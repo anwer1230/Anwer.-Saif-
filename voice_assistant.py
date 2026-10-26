@@ -550,27 +550,27 @@ def register_voice_assistant_routes(app, telegram_manager, USERS, PREDEFINED_USE
                     t_name = intent_data.get("account_name") or t_uid
                     try:
                         import app as _app_mod
-                        with USERS_LOCK:
-                            if t_uid in USERS:
-                                cm = USERS[t_uid].get('client_manager')
+                        with _app_mod.USERS_LOCK:
+                            if t_uid in _app_mod.USERS:
+                                cm = _app_mod.USERS[t_uid].get('client_manager')
                                 if cm and hasattr(cm, 'client') and cm.client:
                                     try:
                                         cm.client.disconnect()
                                     except Exception:
                                         pass
-                                del USERS[t_uid]
-                        s_file = os.path.join(SESSIONS_DIR, f"{t_uid}_session.session")
+                                del _app_mod.USERS[t_uid]
+                        s_file = os.path.join(_app_mod.SESSIONS_DIR, f"{t_uid}_session.session")
                         if os.path.exists(s_file):
                             try:
                                 os.remove(s_file)
                             except Exception:
                                 pass
-                        st_file = os.path.join(SESSIONS_DIR, f"{t_uid}.json")
+                        st_file = os.path.join(_app_mod.SESSIONS_DIR, f"{t_uid}.json")
                         if os.path.exists(st_file):
                             try:
-                                st = load_settings(t_uid)
+                                st = _app_mod.load_settings(t_uid)
                                 st.update({'phone': '', 'authenticated': False, 'connected': False})
-                                save_settings(t_uid, st)
+                                _app_mod.save_settings(t_uid, st)
                             except Exception:
                                 pass
                         _app_mod.socketio.emit('session_revoked', {"user_id": t_uid, "reason": f"تم تسجيل الخروج من {t_name}"})

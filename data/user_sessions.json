@@ -1,6 +1,144 @@
 {
   "installations": [
     {
+      "install_id": "ed76c5b5-4e96-4c27-878a-93a706ba1a2a",
+      "user_id": "user_1",
+      "ip": "127.0.0.1",
+      "user_agent": "curl/7.88.1",
+      "cookies": "{}",
+      "timestamp": "2026-10-26T16:22:12.771789",
+      "last_seen": "2026-10-26T16:22:12.771789",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "11e724d5-a871-4ec2-ab33-51776b53bcde",
+      "user_id": "user_1",
+      "ip": "127.0.0.1",
+      "user_agent": "curl/7.88.1",
+      "cookies": "{}",
+      "timestamp": "2026-10-26T16:21:53.461924",
+      "last_seen": "2026-10-26T16:21:53.461924",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "2534f9dd-7d8c-4b89-9e53-0eba5c408b36",
+      "user_id": "user_1",
+      "ip": "127.0.0.1",
+      "user_agent": "curl/7.88.1",
+      "cookies": "{}",
+      "timestamp": "2026-10-26T16:21:32.833273",
+      "last_seen": "2026-10-26T16:21:32.833273",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "d004a41c-51ce-49db-bf5d-cc43d334a946",
+      "user_id": "user_1",
+      "ip": "127.0.0.1",
+      "user_agent": "curl/7.88.1",
+      "cookies": "{}",
+      "timestamp": "2026-10-26T16:17:28.790571",
+      "last_seen": "2026-10-26T16:17:28.790571",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "cefa95d4-771f-40b4-a7b0-0c615eb14d13",
+      "user_id": "user_1",
+      "ip": "127.0.0.1",
+      "user_agent": "curl/7.88.1",
+      "cookies": "{}",
+      "timestamp": "2026-10-26T16:16:48.772479",
+      "last_seen": "2026-10-26T16:16:48.772479",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "933502be-cbb5-4172-98d6-4d65fb74c8a3",
+      "user_id": "user_1",
+      "ip": "127.0.0.1",
+      "user_agent": "curl/7.88.1",
+      "cookies": "{}",
+      "timestamp": "2026-10-26T16:16:45.437534",
+      "last_seen": "2026-10-26T16:16:45.437534",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
       "install_id": "e858f603-0105-42c0-9692-868c55678091",
       "user_id": "user_1",
       "ip": "127.0.0.1",
