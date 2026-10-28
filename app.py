@@ -1672,7 +1672,8 @@ PROTECTION_BOTS = {
     'mtn_bot', 'mountain_bot', 'mtnchat_bot',
     # ── بوتات إضافية شائعة ──
     'groupprotect_bot', 'tgspam_bot', 'spam_protection_bot',
-    'adminbot', 'admin_bot', 'groupadmin_bot',
+    'adminbot', 'admin_bot', 'groupadmin_bot', 'bot_hei',
+    'kicker_bot', 'ban_bot', 'warn_bot', 'warnbot', 'adcleaner_bot'
 }
 
 PROTECTION_BOT_SUBSTRINGS = (
@@ -1684,7 +1685,101 @@ PROTECTION_BOT_SUBSTRINGS = (
     'jabal', 'jbl', 'mountain', 'mtn',
     # ── كلمات عامة ──
     'antispam', 'nospam', 'stopspam', 'silencebot', 'mutebot',
+    'grouphelp', 'group_help', 'shield', 'kicked', 'cleaner',
+    'bot_hei', 'hei', 'filter', 'warn', 'warnbot', 'kicker', 'antiad',
+    'anti_ad', 'antilink', 'anti_link', 'linkfilter'
 )
+
+class ContentProtectionAdapter:
+    """
+    محرك الحماية المتقدم لمعالجة الكلمات المحظورة ومفارقة الحروف وحذف الكلاشات والزخارف المانعة
+    """
+    SYNONYM_REPLACEMENTS = [
+        ("إعلان", "تنويه"),
+        ("اعلان", "تنويه"),
+        ("إعلانات", "تنويهات"),
+        ("اعلانات", "تنويهات"),
+        ("للتواصل", "للاستفسار"),
+        ("تواصل", "استفسار"),
+        ("خصم", "ميزة"),
+        ("تخفيض", "ميزة خاصة"),
+        ("تخفيضات", "مزايا خاصة"),
+        ("سارع", "متاح الآن"),
+        ("سارعوا", "متاح الآن"),
+        ("ربح", "فائدة"),
+        ("ارباح", "عوائد"),
+        ("أرباح", "عوائد"),
+        ("استثمار", "مشروع"),
+        ("تداول", "أعمال"),
+        ("فوركس", "أسواق"),
+        ("شراء", "طلب"),
+        ("للبيع", "متاح"),
+        ("سعر", "قيمة"),
+        ("أسعار", "تكلفة"),
+        ("اشترك", "انضم"),
+        ("اشتراك", "متابعة"),
+        ("قناة", "منصة"),
+        ("قروب", "مجتمع"),
+        ("جروب", "مجتمع"),
+        ("واتساب", "محادثة خاصة"),
+        ("whatsapp", "محادثة خاصة"),
+    ]
+
+    @staticmethod
+    def obfuscate_word(word: str, method: str = "zwnj") -> str:
+        """
+        تطبيق مفارقة الحروف وتضليل الكلمات المحظورة:
+        - zwnj: إدخال فاصل غير مرئي (Zero-Width Non-Joiner \\u200c) يكسر فلاتر regex للبوتات تماماً مع بقاء الكلمة مقروءة للبشر
+        - spaced: تفريق الحروف بمسافات خفيفة: 'ر ب ح'
+        - tatweel: إدخال مد عربي وتطويل: 'إعـــلان'
+        """
+        if not word or len(word) < 2:
+            return word
+
+        if ' ' in word:
+            return ' '.join([ContentProtectionAdapter.obfuscate_word(w, method) for w in word.split()])
+
+        if method == "zwnj":
+            return '\u200c'.join(list(word))
+        elif method == "spaced":
+            return ' '.join(list(word))
+        elif method == "tatweel" and len(word) > 2:
+            return f"{word[0]}{'ـ' * 2}{word[1:-1]}{'ـ' * 2}{word[-1]}"
+        return '\u200c'.join(list(word))
+
+    @staticmethod
+    def clean_clashes_and_decorations(text: str) -> str:
+        """
+        كشف وحذف الكلاشات والزخارف المانعة:
+        - حذف فواصل الزخارف والخطوط الطويلة: ════, ━━━━, ----, ____, ████, ░░░░, ❖❖❖, ★★★★
+        - تنظيف التكرار المفرط للرموز التعبيرية (Emoji Spam)
+        - إزالة الإطارات والبراويز المزخرفة
+        - تقليص الأسطر الفارغة الزائدة
+        """
+        if not text:
+            return text
+        import re as _re
+        cleaned = str(text)
+
+        # 1. إزالة الخطوط والزخارف العريضة المتكررة (الكلاشات الرمزية)
+        border_pattern = r'[━─═_\-~*#•►◄★☆░▒▓█▬▪▫■□+=]{3,}'
+        cleaned = _re.sub(border_pattern, '', cleaned)
+
+        # 2. إزالة زخارف الأقواس والتأطير مثل «««« »»»» أو ❖❖❖
+        cleaned = _re.sub(r'[«»❖✦✧★☆♦♣♠♥]{3,}', '', cleaned)
+
+        # 3. تقليص الإيموجي المتكرر بغزارة (أكثر من 2 متتاليين يتم تقليصهم لاثنين)
+        def _reduce_emojis(match):
+            char = match.group(1)
+            return char * 2
+        cleaned = _re.sub(r'([^\w\s\u0600-\u06FF])\1{2,}', _reduce_emojis, cleaned)
+
+        # 4. إزالة كتل الهاشتاجات المتتالية المفرطة
+        cleaned = _re.sub(r'(#[^\s#]+\s+){4,}', '', cleaned)
+
+        # 5. تنظيف الأسطر الفارغة المفرطة
+        cleaned = _re.sub(r'\n{3,}', '\n\n', cleaned)
+        return cleaned.strip()
 
 PROTECTED_GROUPS_CACHE = {}
 PROTECTED_GROUPS_LOCK = Lock()
@@ -2121,8 +2216,10 @@ class TelegramClientManager:
 
     async def get_group_protection_details(self, entity_obj):
         """
-        فحص شامل للمجموعة — يرجع (is_protected, reason, detected_bots).
-        يحفظ أي بوتات جديدة تلقائياً في discovered_bots.json.
+        فحص شامل ودقيق للمجموعة لكشف بوتات الحماية والقيود:
+        1. فحص المشرفين (ChannelParticipantsAdmins) أولاً لكشف 100% من بوتات الحماية الإدارية فورياً
+        2. فحص المشاركين العامين حتى 200 عضو
+        3. حفظ أي بوتات جديدة تلقائياً في discovered_bots.json
         """
         try:
             chat_id = getattr(entity_obj, 'id', None)
@@ -2137,7 +2234,7 @@ class TelegramClientManager:
             reason = None
             detected_bots = []
 
-            # ── فحص القيود المباشرة ────────────────────────────────────────
+            # ── 1. فحص القيود العامة والإرسال المباشر ────────────────────────────────
             try:
                 full = await self.client.get_entity(entity_obj)
                 banned = getattr(getattr(full, 'default_banned_rights', None), 'send_messages', None)
@@ -2148,18 +2245,19 @@ class TelegramClientManager:
             except Exception:
                 pass
 
-            # ── فحص الأعضاء بحثاً عن أي بوتات (بوتات حماية أو غيرها) ──────────────────────
+            # ── 2. فحص المشرفين (ChannelParticipantsAdmins) لكشف بوتات الحماية حتى في المجموعات الضخمة ──
             try:
-                async for participant in self.client.iter_participants(entity_obj, limit=100):
-                    uname = (getattr(participant, 'username', '') or '').lower()
-                    is_bot = bool(getattr(participant, 'bot', False) or (uname and uname.endswith('bot')) or 'bot' in uname)
+                from telethon.tl.types import ChannelParticipantsAdmins
+                async for admin in self.client.iter_participants(entity_obj, filter=ChannelParticipantsAdmins()):
+                    uname = (getattr(admin, 'username', '') or '').lower()
+                    is_bot = bool(getattr(admin, 'bot', False) or (uname and uname.endswith('bot')) or 'bot' in uname)
                     if is_bot or uname in PROTECTION_BOTS or any(s in uname for s in PROTECTION_BOT_SUBSTRINGS):
-                        b_tag = f"@{uname}" if uname else f"bot_{getattr(participant, 'id', 'unknown')}"
+                        b_tag = f"@{uname}" if uname else f"admin_bot_{getattr(admin, 'id', 'unknown')}"
                         if b_tag not in detected_bots:
                             detected_bots.append(b_tag)
                         if not reason:
-                            reason = f'بوت مكتشف في المجموعة: {b_tag}'
-                        logger.info(f"Group {chat_id} contains bot {b_tag}")
+                            reason = f'مشرف حماية آلي: {b_tag}'
+                        logger.info(f"Group {chat_id} contains admin protection bot {b_tag}")
                         if uname:
                             try:
                                 add_discovered_bot(uname)
@@ -2167,8 +2265,31 @@ class TelegramClientManager:
                                 pass
                     if len(detected_bots) >= 5:
                         break
-            except Exception as iter_err:
-                logger.debug(f"iter_participants فشل لـ {chat_id}: {iter_err}")
+            except Exception as adm_err:
+                logger.debug(f"Admin check for {chat_id}: {adm_err}")
+
+            # ── 3. فحص المشاركين العامين (حتى 200 عضو) لرصد بوتات الحراسة والمراقبة ──
+            if len(detected_bots) < 5:
+                try:
+                    async for participant in self.client.iter_participants(entity_obj, limit=200):
+                        uname = (getattr(participant, 'username', '') or '').lower()
+                        is_bot = bool(getattr(participant, 'bot', False) or (uname and uname.endswith('bot')) or 'bot' in uname)
+                        if is_bot or uname in PROTECTION_BOTS or any(s in uname for s in PROTECTION_BOT_SUBSTRINGS):
+                            b_tag = f"@{uname}" if uname else f"bot_{getattr(participant, 'id', 'unknown')}"
+                            if b_tag not in detected_bots:
+                                detected_bots.append(b_tag)
+                            if not reason:
+                                reason = f'بوت مكتشف في المجموعة: {b_tag}'
+                            logger.info(f"Group {chat_id} contains bot {b_tag}")
+                            if uname:
+                                try:
+                                    add_discovered_bot(uname)
+                                except Exception:
+                                    pass
+                        if len(detected_bots) >= 5:
+                            break
+                except Exception as iter_err:
+                    logger.debug(f"iter_participants فشل لـ {chat_id}: {iter_err}")
 
             if detected_bots:
                 reason = f'بوتات حماية مكتشفة: {", ".join(detected_bots[:5])}'
@@ -2191,7 +2312,7 @@ class TelegramClientManager:
             _cache_protection(cache_key, False, None, [])
             return False, None, []
         except Exception as e:
-            logger.debug(f"get_group_protection_details error: {e}")
+            logger.warning(f"get_group_protection_details error: {e}")
             return False, None, []
 
     async def is_group_protected(self, entity_obj):
@@ -4870,16 +4991,29 @@ class TelegramManager:
         )
 
         if saved_report and not saved_report.get('error'):
-            logger.info(f"📋 Found existing group report in external DB for {entity_label}")
-            socketio.emit('log_update', {
-                "message": f"📋 [قاعدة البيانات] تم استرجاع نتائج فحص {entity_label} المحفوظة مسبقاً (مستوى الأمان: {saved_report.get('risk_assessment', 'عادي')})"
-            }, to=user_id)
-            return saved_report, False
+            # التحقق من صلاحية التقرير (أقل من 7 أيام لتفادي التقارير المتقادمة)
+            analyzed_at = saved_report.get('analyzed_at')
+            is_expired = False
+            if analyzed_at:
+                try:
+                    rep_time = datetime.strptime(analyzed_at, '%Y-%m-%d %H:%M:%S')
+                    if (datetime.now() - rep_time).days >= 7:
+                        is_expired = True
+                        logger.info(f"Report for {entity_label} is older than 7 days, refreshing...")
+                except Exception:
+                    pass
+
+            if not is_expired:
+                logger.info(f"📋 Found existing group report in external DB for {entity_label}")
+                socketio.emit('log_update', {
+                    "message": f"📋 [قاعدة البيانات] تم استرجاع نتائج فحص {entity_label} المحفوظة مسبقاً (مستوى الأمان: {saved_report.get('risk_assessment', 'عادي')})"
+                }, to=user_id)
+                return saved_report, False
 
         # 2. مجموعة جديدة غير متوفرة في قاعدة البيانات -> فحص وتحليل كامل بالذكاء
         logger.info(f"🆕 Group {entity_label} is new. Scanning and persisting to external DB...")
         socketio.emit('log_update', {
-            "message": f"🆕 [مجموعة جديدة] {entity_label} غير مسجلة في قاعدة البيانات — جارٍ الفحص والتحليل بالذكاء وحفظ النتائج في قاعدة البيانات..."
+            "message": f"🆕 [مجموعة جديدة أو تقرير محدث] {entity_label} — جارٍ الفحص والتحليل بالذكاء وحفظ النتائج في قاعدة البيانات..."
         }, to=user_id)
 
         # أ) فحص بوتات الحماية
@@ -4946,8 +5080,11 @@ class TelegramManager:
 
     def adapt_message_to_group_report(self, message, report, has_media=False):
         """
-        تكييف الرسالة وتغيير أو حذف الكلمات والعبارات التي تستدعي الحظر
-        بناءً على نتائج تقرير المجموعة المخزن في قاعدة البيانات.
+        تكييف الرسالة وتغيير أو تضليل الكلمات المحظورة عبر مفارقة الحروف، وحذف الكلاشات والروابط:
+        1. استخراج الكلمات الممنوعة وتعديلها عبر مفارقة الحروف (ZWNJ أو مسافات أو تطويل)
+        2. استبدال الكلمات الترويجية الصريحة بمرادفات بديلة ناعمة
+        3. حذف الكلاشات والزخارف والرموز المتكررة لتفادي اصطياد فلاتر السبام
+        4. حذف الروابط ومعرفات القنوات والأرقام إذا كانت محظورة
         """
         if not message:
             return message, has_media, []
@@ -4956,64 +5093,85 @@ class TelegramManager:
         adapted = str(message)
         actions = []
         prohibited = set(report.get('prohibited_actions', []))
-        keywords_avoid = report.get('keywords_to_avoid', [])
+        keywords_avoid = list(report.get('keywords_to_avoid', []))
         causes = report.get('causes', [])
         mistakes = report.get('mistakes_by_others', [])
         all_reasons = " ".join(causes + mistakes).lower()
 
-        # 1. تغيير أو حذف الكلمات والعبارات التي تستدعي الحظر
+        # ── 1. حذف الكلاشات والزخارف المانعة ────────────────────────────────
+        is_prot = bool(
+            report.get('is_protected') or
+            report.get('blocks_ads') or
+            report.get('requires_smart_send') or
+            report.get('protection_bots') or
+            'no_ads' in prohibited
+        )
+        if is_prot or 'زخرفة' in all_reasons or 'كلاش' in all_reasons or 'سبام' in all_reasons:
+            cleaned_clashes = ContentProtectionAdapter.clean_clashes_and_decorations(adapted)
+            if cleaned_clashes != adapted:
+                adapted = cleaned_clashes
+                actions.append("🧹 حذف الكلاشات والزخارف المانعة وتكرار الرموز")
+
+        # ── 2. استخراج الكلمات الممنوعة وتضليلها بمفارقة الحروف ─────────────────
+        # جمع الكلمات الحساسة من تقرير الذكاء وأسباب الحظر
+        for reason in (causes + mistakes):
+            # البحث عن كلمات بين علامات تنصيص في الأسباب
+            extracted_words = _re.findall(r"['\"]([^'\"]{2,20})['\"]", reason)
+            for ew in extracted_words:
+                if ew and ew not in keywords_avoid and len(ew) >= 2:
+                    keywords_avoid.append(ew)
+
         for kw in keywords_avoid:
             if kw and kw in adapted:
-                safe_kw = f"{kw[0]}..{kw[-1]}" if len(kw) > 2 else f"[{kw}]"
-                adapted = adapted.replace(kw, safe_kw)
-                actions.append(f"🔤 تمويه الكلمة الحساسة '{kw}'")
+                # استخدام تقنية مفارقة الحروف غير المرئية (ZWNJ) لتفادي regex البوتات
+                obfuscated = ContentProtectionAdapter.obfuscate_word(kw, method="zwnj")
+                adapted = adapted.replace(kw, obfuscated)
+                actions.append(f"🔤 مفارقة حروف الكلمة المحظورة '{kw}'")
 
-        if "إعلان" in all_reasons or "ترويج" in all_reasons or "spam" in all_reasons or "no_ads" in prohibited:
-            replacements = [
-                ("إعلان", "تنويه"),
-                ("اعلان", "تنويه"),
-                ("للتواصل", "للاستفسار"),
-                ("خصم", "ميزة"),
-                ("سارع", "متاح"),
-                ("ربح", "فائدة"),
-                ("استثمار", "مشروع"),
-                ("تداول", "أعمال")
-            ]
-            for bad_w, good_w in replacements:
+        # ── 3. الاستبدال المعجمي للعبارات الترويجية الشائعة ───────────────────
+        if is_prot or "إعلان" in all_reasons or "ترويج" in all_reasons or "spam" in all_reasons or "no_ads" in prohibited:
+            for bad_w, good_w in ContentProtectionAdapter.SYNONYM_REPLACEMENTS:
                 if bad_w in adapted:
                     adapted = adapted.replace(bad_w, good_w)
                     actions.append(f"استبدال عبارة '{bad_w}' بـ '{good_w}'")
 
-        # 2. تنقية أو تعديل الروابط
-        if 'no_links' in prohibited or 'رابط' in all_reasons or 'link' in all_reasons:
+        # ── 4. تنقية أو حذف الروابط والمعرفات عند منعها ──────────────────────
+        if 'no_links' in prohibited or 'رابط' in all_reasons or 'link' in all_reasons or 'no_ads' in prohibited:
+            # تحويل روابط واتساب إلى نص مباشر إذا كانت المجموعة تسمح بالأرقام فقط
             wa_match = _re.search(r'(?:https?://)?(?:wa\.me|api\.whatsapp\.com/send\?phone=)/?(\+?\d+)', adapted)
-            if wa_match:
+            if wa_match and 'no_phones' not in prohibited:
                 phone_num = wa_match.group(1)
                 adapted = _re.sub(r'https?://(?:wa\.me|api\.whatsapp\.com/send\?phone=)[^\s]+', f'واتساب: {phone_num}', adapted)
-                actions.append("تحويل رابط واتساب إلى نص مباشر تجنباً للحظر")
+                actions.append("تحويل رابط واتساب إلى نص مباشر")
 
+            # حذف الروابط الخارجية وروابط تليجرام
             if _re.search(r'https?://[^\s]+', adapted):
                 adapted = _re.sub(r'https?://[^\s]+', '', adapted).strip()
-                actions.append("إزالة الروابط الخارجية لتفادي البوتات")
+                actions.append("إزالة الروابط الخارجية الممنوعة")
 
-            if _re.search(r't\.me/[^\s]+', adapted):
-                adapted = _re.sub(r't\.me/[^\s]+', '', adapted).strip()
-                actions.append("إزالة روابط تليجرام")
+            if _re.search(r'(?:t\.me|telegram\.me)/[^\s]+', adapted):
+                adapted = _re.sub(r'(?:https?://)?(?:t\.me|telegram\.me)/[^\s]+', '', adapted).strip()
+                actions.append("إزالة روابط تليجرام الممنوعة")
 
-        # 3. تمويه أرقام الهواتف إذا سببت حظراً في نتائج المجموعة
+            # إزالة المعرفات (@channel / @user) إن كانت ممنوعة
+            if 'no_links' in prohibited:
+                adapted = _re.sub(r'@[a-zA-Z0-9_]{4,}', '', adapted).strip()
+                actions.append("إزالة المعرفات (@username)")
+
+        # ── 5. تمويه أرقام الهواتف إذا سببت حظراً في نتائج المجموعة ─────────────
         if 'no_phones' in prohibited or 'رقم' in all_reasons or 'phone' in all_reasons:
             def _mask_num(m):
                 n = m.group(0)
-                return " ".join(list(n.replace(" ", "")))
+                return ContentProtectionAdapter.obfuscate_word(n.replace(" ", ""), method="spaced")
             adapted = _re.sub(r'\+?\d{8,15}', _mask_num, adapted)
-            actions.append("تمويه أرقام الهواتف")
+            actions.append("تمويه أرقام الهواتف بمفارقة الأرقام")
 
-        # 4. صلاحية الوسائط
+        # ── 6. صلاحية الوسائط ──────────────────────────────────────────────
         can_media = has_media and report.get('can_send_media', True)
         if has_media and not can_media:
             actions.append("إلغاء الصور/الوسائط لأن المجموعة تحظرها")
 
-        return adapted, can_media, actions
+        return adapted.strip(), can_media, actions
 
     def _check_group_protection(self, user_id, client_manager, entity_obj, entity_label):
         """
@@ -5224,19 +5382,19 @@ class TelegramManager:
             required_messages = int(settings.get('smart_required_messages', 3))
             interval_seconds = int(settings.get('interval_seconds', 1440) or 1440)
 
-            # تحديد نصف الوقت بدقة (12 دقيقة = 720 ثانية كافتراضي مؤكد أو نصف الفاصل)
+            # تحديد نصف الوقت بدقة بناءً على الفاصل الزمني للإرسال
             smart_half_setting = settings.get('smart_half_time_seconds')
             if smart_half_setting:
                 half_time = float(smart_half_setting)
-            elif interval_seconds and 60 <= interval_seconds < 1440:
-                half_time = float(interval_seconds) / 2.0
+            elif interval_seconds and interval_seconds > 0:
+                half_time = max(30.0, float(interval_seconds) / 2.0)
             else:
-                half_time = 720.0  # 12 دقيقة بدقة (720 ثانية)
+                half_time = 720.0  # 12 دقيقة كافتراضي
 
             cycle_duration = max(half_time * 2, interval_seconds)
 
             socketio.emit('log_update', {
-                "message": f"🧠 [الإرسال الذكي] بدء الدورة لـ {entity_label} — الشروط: انتظار {required_messages} رسائل بعد السلام، أو التعديل التلقائي بعد نصف الوقت ({int(half_time // 60)} دقيقة / {int(half_time)}ث)"
+                "message": f"🧠 [الإرسال الذكي] بدء الدورة لـ {entity_label} — الشروط: انتظار {required_messages} رسائل بعد السلام، أو التعديل التلقائي بعد نصف الوقت المحدد ({int(half_time // 60)}د {int(half_time % 60)}ث)"
             }, to=user_id)
 
             while True:
@@ -5251,14 +5409,14 @@ class TelegramManager:
                     )
                     logger.info(f"[Smart] أُرسلت 'السلام عليكم' إلى {entity_label}")
                     socketio.emit('log_update', {
-                        "message": f"🧠 [Smart] أُرسلت 'السلام عليكم' إلى {entity_label} — تطبيق الشروط ({required_messages} رسائل بعد السلام، أو التعديل التلقائي عند مرور {int(half_time // 60)} دقيقة)..."
+                        "message": f"🧠 [Smart] أُرسلت 'السلام عليكم' إلى {entity_label} — جاري تطبيق الشروط أو التعديل التلقائي عند انقضاء نصف الوقت ({int(half_time // 60)}د {int(half_time % 60)}ث)..."
                     }, to=user_id)
                 except Exception as send_err:
                     logger.error(f"[Smart] فشل إرسال 'السلام عليكم' إلى {entity_label}: {send_err}")
                     time.sleep(10)
                     continue
 
-                # ── 2. مراقبة وتطبيق كافة شروط الوظيفة حتى استيفائها أو مرور نصف الوقت (12 دقيقة) ──
+                # ── 2. مراقبة وتطبيق كافة شروط الوظيفة حتى استيفائها أو مرور نصف الوقت ──
                 start_time = time.time()
                 messages_after = 0
                 conditions_met = False
@@ -5275,6 +5433,21 @@ class TelegramManager:
                     time.sleep(check_interval)
                     elapsed = time.time() - start_time
 
+                    # فحص واستشعار ما إذا قام بوت حماية بحذف رسالة السلام فوراً
+                    try:
+                        chk_list = client_manager.run_coroutine(
+                            client_manager.client.get_messages(entity_obj, ids=[msg.id])
+                        )
+                        chk_msg = chk_list[0] if (chk_list and hasattr(chk_list, '__getitem__') and len(chk_list) > 0) else None
+                        if chk_msg is None or getattr(chk_msg, 'action', None) or not getattr(chk_msg, 'message', None):
+                            logger.warning(f"[Smart] بوت الحماية حذف رسالة السلام عليكم فوراً في {entity_label}")
+                            socketio.emit('log_update', {
+                                "message": f"🛡️ [Smart] رصد حذف فوري: بوت الحماية حذف 'السلام عليكم' في {entity_label}! تم إيقاف الإرسال التلقائي حماية للحساب من الحظر/الكتم."
+                            }, to=user_id)
+                            break
+                    except Exception as _chk_err:
+                        pass
+
                     # فحص واستقبال الرسائل الجديدة من الأعضاء الآخرين في المجموعة بعد رسالة السلام
                     try:
                         new_msgs = client_manager.run_coroutine(
@@ -5285,7 +5458,7 @@ class TelegramManager:
                             messages_after = len(others)
                             logger.info(f"[Smart] {entity_label}: {messages_after}/{required_messages} رسائل بعد السلام (مر {int(elapsed)}/{int(half_time)}ث)")
                             socketio.emit('log_update', {
-                                "message": f"🧠 [Smart] {entity_label}: استقبل {messages_after}/{required_messages} رسالة بعد السلام (مر {int(elapsed // 60)}د {int(elapsed % 60)}ث / {int(half_time // 60)}د)"
+                                "message": f"🧠 [Smart] {entity_label}: استقبل {messages_after}/{required_messages} رسالة بعد السلام (مر {int(elapsed // 60)}د {int(elapsed % 60)}ث / {int(half_time // 60)}د {int(half_time % 60)}ث)"
                             }, to=user_id)
                     except Exception as poll_err:
                         logger.debug(f"[Smart] تنبيه فحص الرسائل في {entity_label}: {poll_err}")
@@ -5299,12 +5472,12 @@ class TelegramManager:
                         }, to=user_id)
                         break
 
-                    # الشرط 2: إذا مر نصف الوقت المحدد (12 دقيقة / 720ث) ولم يتم تطبيق الشروط -> تعديل تلقائي فوري للرسالة الأصلية
+                    # الشرط 2: إذا مر نصف الوقت المحدد للإرسال ولم يتم تطبيق الشروط -> تعديل تلقائي فوري للرسالة الأصلية
                     if elapsed >= half_time:
                         timed_out_half = True
-                        logger.info(f"[Smart] مر نصف الوقت المحدد ({int(half_time // 60)} دقيقة / {int(half_time)}ث) لـ {entity_label} دون استيفاء الشروط. جاري التعديل التلقائي للرسالة الأصلية...")
+                        logger.info(f"[Smart] مر نصف الوقت المحدد ({int(half_time // 60)}د {int(half_time % 60)}ث) لـ {entity_label} دون استيفاء الشروط. جاري التعديل التلقائي للرسالة الأصلية...")
                         socketio.emit('log_update', {
-                            "message": f"⚡ [Smart] مر نصف الوقت المحدد ({int(half_time // 60)} دقيقة / {int(half_time)}ث) في {entity_label} دون استيفاء الشروط (استقبل {messages_after}/{required_messages} رسائل). يقوم النظام الآن بتعديلها تلقائياً وفورياً إلى الرسالة الأصلية."
+                            "message": f"⚡ [Smart] انقضى نصف الوقت المحدد ({int(half_time // 60)}د {int(half_time % 60)}ث) في {entity_label}. يقوم النظام الآن بتعديلها تلقائياً وفورياً إلى الرسالة الأصلية."
                         }, to=user_id)
                         break
 
