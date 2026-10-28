@@ -330,13 +330,17 @@ def adapt_message_safely(original_message, analysis, has_media=False):
         can_send_media = False
         actions_taken.append("🖼️ تحويل الإرسال إلى نصي فقط لأن المجموعة تحظر إرسال الصور/الوسائط")
 
-    # 5. تنقية الكلمات المحظورة المحددة
+    # 5. تنقية الكلمات المحظورة المحددة وتضليلها بمفارقة الحروف ورموز ZWNJ
     keywords_avoid = analysis.get("keywords_to_avoid", [])
     for kw in keywords_avoid:
         if kw and kw in adapted_message:
-            # استبدال الكلمة بنقاط أو مرادف لطيف
-            adapted_message = adapted_message.replace(kw, f"[{kw[0]}..{kw[-1]}]")
-            actions_taken.append(f"🔤 استبدال الكلمة الحساسة '{kw}' التي سببت كتم أعضاء آخرين")
+            try:
+                from app import mask_word
+                obfuscated = mask_word(kw)
+            except Exception:
+                obfuscated = '\u200c'.join(list(kw)) if len(kw) >= 2 else kw
+            adapted_message = adapted_message.replace(kw, obfuscated)
+            actions_taken.append(f"🔤 تمويه حروف الكلمة المحظورة '{kw}' عبر ZWNJ ومفارقة الحروف")
 
     # 6. فرض فاصل أمان زمني لتجنب Flood / Spam Detection
     if "slow_down" in prohibited or risk in ("high", "medium"):

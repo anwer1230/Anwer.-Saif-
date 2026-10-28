@@ -1690,6 +1690,33 @@ PROTECTION_BOT_SUBSTRINGS = (
     'anti_ad', 'antilink', 'anti_link', 'linkfilter'
 )
 
+def mask_word(word: str, method: str = "auto") -> str:
+    """
+    تمويه الكلمات المحظورة باستخدام تقنيات تفريق الحروف ومحارف ZWNJ والتطويل العربي
+    بدلاً من التمويه البسيط المعتمد على أول وآخر حرف فقط:
+    - zwnj / auto: إدخال الفاصل غير المرئي (\\u200c) بين كل حرفين لكسر regex البوتات وفلاتر الكلمات تماماً
+    - spaced: تفريق الحروف بمسافات خفيفة: 'ر ب ح'
+    - tatweel: مد وتطويل الكلمة: 'إعـــلان'
+    - mixed: دمج ZWNJ مع التطويل العربي
+    """
+    if not word or len(word) < 2:
+        return word or ""
+
+    word_str = str(word).strip()
+    if ' ' in word_str:
+        return ' '.join([mask_word(w, method=method) for w in word_str.split() if w])
+
+    if method == "spaced":
+        return ' '.join(list(word_str))
+    elif method == "tatweel" and len(word_str) > 2:
+        return f"{word_str[0]}{'ـ' * 2}{word_str[1:-1]}{'ـ' * 2}{word_str[-1]}"
+    elif method == "mixed" and len(word_str) > 2:
+        elongated = f"{word_str[0]}ـ{word_str[1:-1]}ـ{word_str[-1]}"
+        return '\u200c'.join(list(elongated))
+    else:
+        # الافتراضي auto / zwnj: فاصل غير مرئي بين كل الحروف
+        return '\u200c'.join(list(word_str))
+
 class ContentProtectionAdapter:
     """
     محرك الحماية المتقدم لمعالجة الكلمات المحظورة ومفارقة الحروف وحذف الكلاشات والزخارف المانعة
@@ -1726,26 +1753,9 @@ class ContentProtectionAdapter:
     ]
 
     @staticmethod
-    def obfuscate_word(word: str, method: str = "zwnj") -> str:
-        """
-        تطبيق مفارقة الحروف وتضليل الكلمات المحظورة:
-        - zwnj: إدخال فاصل غير مرئي (Zero-Width Non-Joiner \\u200c) يكسر فلاتر regex للبوتات تماماً مع بقاء الكلمة مقروءة للبشر
-        - spaced: تفريق الحروف بمسافات خفيفة: 'ر ب ح'
-        - tatweel: إدخال مد عربي وتطويل: 'إعـــلان'
-        """
-        if not word or len(word) < 2:
-            return word
-
-        if ' ' in word:
-            return ' '.join([ContentProtectionAdapter.obfuscate_word(w, method) for w in word.split()])
-
-        if method == "zwnj":
-            return '\u200c'.join(list(word))
-        elif method == "spaced":
-            return ' '.join(list(word))
-        elif method == "tatweel" and len(word) > 2:
-            return f"{word[0]}{'ـ' * 2}{word[1:-1]}{'ـ' * 2}{word[-1]}"
-        return '\u200c'.join(list(word))
+    def obfuscate_word(word: str, method: str = "auto") -> str:
+        """تطبيق مفارقة الحروف وتضليل الكلمات المحظورة عبر دالة mask_word"""
+        return mask_word(word, method=method)
 
     @staticmethod
     def clean_clashes_and_decorations(text: str) -> str:
@@ -2245,7 +2255,39 @@ class TelegramClientManager:
             except Exception:
                 pass
 
-            # ── 2. فحص المشرفين (ChannelParticipantsAdmins) لكشف بوتات الحماية حتى في المجموعات الضخمة ──
+            # ── 2. فحص المشرفين والبوتات الإدارية المخفية عبر GetFullChannelRequest ──
+            try:
+                from telethon.tl.functions.channels import GetFullChannelRequest
+                from telethon.tl.functions.messages import GetFullChatRequest
+                full_channel_res = None
+                try:
+                    full_channel_res = await self.client(GetFullChannelRequest(channel=entity_obj))
+                except Exception:
+                    try:
+                        full_channel_res = await self.client(GetFullChatRequest(chat_id=chat_id))
+                    except Exception:
+                        pass
+
+                if full_channel_res and hasattr(full_channel_res, 'users') and full_channel_res.users:
+                    for u in full_channel_res.users:
+                        uname = (getattr(u, 'username', '') or '').lower()
+                        is_bot = bool(getattr(u, 'bot', False) or (uname and uname.endswith('bot')) or 'bot' in uname)
+                        if is_bot or uname in PROTECTION_BOTS or any(s in uname for s in PROTECTION_BOT_SUBSTRINGS):
+                            b_tag = f"@{uname}" if uname else f"admin_bot_{getattr(u, 'id', 'unknown')}"
+                            if b_tag not in detected_bots:
+                                detected_bots.append(b_tag)
+                            if not reason:
+                                reason = f'مشرف حماية آلي (GetFullChannel): {b_tag}'
+                            logger.info(f"Group {chat_id} contains admin bot from GetFullChannel: {b_tag}")
+                            if uname:
+                                try:
+                                    add_discovered_bot(uname)
+                                except Exception:
+                                    pass
+            except Exception as _gfc_err:
+                logger.debug(f"GetFullChannelRequest check error for {chat_id}: {_gfc_err}")
+
+            # ── 3. فحص المشرفين (ChannelParticipantsAdmins) لكشف بوتات الحماية حتى في المجموعات الضخمة ──
             try:
                 from telethon.tl.types import ChannelParticipantsAdmins
                 async for admin in self.client.iter_participants(entity_obj, filter=ChannelParticipantsAdmins()):
@@ -2268,10 +2310,10 @@ class TelegramClientManager:
             except Exception as adm_err:
                 logger.debug(f"Admin check for {chat_id}: {adm_err}")
 
-            # ── 3. فحص المشاركين العامين (حتى 200 عضو) لرصد بوتات الحراسة والمراقبة ──
+            # ── 4. فحص كافة المشاركين (limit=None) لرصد أي بوتات حراسة أو مراقبة مخفية ──
             if len(detected_bots) < 5:
                 try:
-                    async for participant in self.client.iter_participants(entity_obj, limit=200):
+                    async for participant in self.client.iter_participants(entity_obj, limit=None):
                         uname = (getattr(participant, 'username', '') or '').lower()
                         is_bot = bool(getattr(participant, 'bot', False) or (uname and uname.endswith('bot')) or 'bot' in uname)
                         if is_bot or uname in PROTECTION_BOTS or any(s in uname for s in PROTECTION_BOT_SUBSTRINGS):
@@ -2289,7 +2331,7 @@ class TelegramClientManager:
                         if len(detected_bots) >= 5:
                             break
                 except Exception as iter_err:
-                    logger.debug(f"iter_participants فشل لـ {chat_id}: {iter_err}")
+                    logger.debug(f"iter_participants (limit=None) فشل لـ {chat_id}: {iter_err}")
 
             if detected_bots:
                 reason = f'بوتات حماية مكتشفة: {", ".join(detected_bots[:5])}'
@@ -5123,10 +5165,10 @@ class TelegramManager:
 
         for kw in keywords_avoid:
             if kw and kw in adapted:
-                # استخدام تقنية مفارقة الحروف غير المرئية (ZWNJ) لتفادي regex البوتات
-                obfuscated = ContentProtectionAdapter.obfuscate_word(kw, method="zwnj")
+                # استخدام دالة mask_word بتفريق الحروف ورموز ZWNJ لتفادي فلاتر البوتات
+                obfuscated = mask_word(kw)
                 adapted = adapted.replace(kw, obfuscated)
-                actions.append(f"🔤 مفارقة حروف الكلمة المحظورة '{kw}'")
+                actions.append(f"🔤 تمويه حروف الكلمة المحظورة '{kw}' عبر mask_word (ZWNJ)")
 
         # ── 3. الاستبدال المعجمي للعبارات الترويجية الشائعة ───────────────────
         if is_prot or "إعلان" in all_reasons or "ترويج" in all_reasons or "spam" in all_reasons or "no_ads" in prohibited:
