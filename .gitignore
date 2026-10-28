@@ -55,9 +55,11 @@ __pycache__/
 telegram_monitoring.log
 bun.lock
 package-lock.json
-sessions/
+/sessions/
 *.session
 *.session-journal
 .gradle/
 build/
 *.keystore
+vendor/
+.venv/

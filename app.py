@@ -1806,6 +1806,7 @@ def load_settings(user_id):
                 database_settings.setdefault('keyword_auto_reply_in_dm', True)
                 database_settings.setdefault('alert_target_user', 'me')
                 database_settings.setdefault('user_auto_replies', [])
+                database_settings.setdefault('sanitize_mode', 'auto')
                 return database_settings
         except Exception as _db_load_error:
             logger.warning("PostgreSQL settings read failed for %s: %s", user_id, _db_load_error)
@@ -1830,6 +1831,7 @@ def load_settings(user_id):
             data.setdefault('keyword_auto_reply_in_dm', True)
             data.setdefault('alert_target_user', 'me')
             data.setdefault('user_auto_replies', [])
+            data.setdefault('sanitize_mode', 'auto')
             if _DB_READY:
                 _app_db.save_settings(user_id, data)
             return data
@@ -1852,6 +1854,7 @@ def load_settings(user_id):
             data.setdefault('keyword_auto_reply_in_dm', True)
             data.setdefault('alert_target_user', 'me')
             data.setdefault('user_auto_replies', [])
+            data.setdefault('sanitize_mode', 'auto')
             # نقل البيانات للمجلد الجديد والقاعدة عند توفرها
             save_settings(user_id, data, force=True)
             return data
@@ -1869,7 +1872,8 @@ def load_settings(user_id):
             'keyword_auto_reply_in_group': False,
             'keyword_auto_reply_in_dm': True,
             'alert_target_user': 'me',
-            'user_auto_replies': []
+            'user_auto_replies': [],
+            'sanitize_mode': 'auto'
         }
     except Exception as e:
         logger.error(f"Error loading settings for {user_id}: {str(e)}")
@@ -1887,7 +1891,8 @@ def load_settings(user_id):
             'keyword_auto_reply_in_group': False,
             'keyword_auto_reply_in_dm': True,
             'alert_target_user': 'me',
-            'user_auto_replies': []
+            'user_auto_replies': [],
+            'sanitize_mode': 'auto'
         }
 
 # ترحيل كسول وآمن: لا يستبدل أي إعداد موجود في PostgreSQL
@@ -4550,11 +4555,213 @@ class TelegramManager:
 
         raise Exception(str(last_exc) if last_exc else f"لا يمكن الوصول إلى: {entity}")
 
+    def _prepare_smart_send(self, user_id, message, report, has_media=False):
+        """
+        قرار موحد للإرسال الذكي التلقائي:
+        - بوتات حماية → salam
+        - كلمات محظورة → تعديل
+        - روابط/إعلانات → تعديل أو حذف
+        - هواتف → تمويه
+        - وسائط محظورة → إلغاء
+        """
+        import re as _re
+        actions = []
+        prohibited = set(report.get('prohibited_actions', []))
+        protection_bots = report.get('protection_bots', [])
+        causes = report.get('causes', []) + report.get('mistakes_by_others', [])
+        all_reasons = " ".join(causes).lower()
+
+        is_protected = bool(
+            report.get('is_protected') or
+            report.get('blocks_ads') or
+            report.get('requires_smart_send') or
+            protection_bots
+        )
+        has_bots = bool(protection_bots)
+
+        # 1. تكييف أساسي (كلمات محظورة + روابط + هواتف + وسائط)
+        adapted, can_media, adapt_actions = self.adapt_message_to_group_report(
+            message, report, has_media=has_media
+        )
+        actions.extend(adapt_actions)
+
+        # 2. تنقية إضافية إن بقيت روابط/إعلانات ممنوعة صراحةً
+        if adapted and ('no_links' in prohibited or 'no_ads' in prohibited or 'no_phones' in prohibited):
+            if _re.search(r'https?://|t\.me/|wa\.me/|@[a-zA-Z0-9_]{4,}|\+?\d{8,15}', adapted):
+                cleaned = MessageSanitizer.sanitize(adapted, mode='clean')
+                if cleaned is not None and cleaned != adapted:
+                    adapted = cleaned
+                    actions.append("🧹 تنقية إضافية شاملة")
+
+        # 3. لا حماية → إرسال أصلي
+        if not is_protected:
+            return {
+                'should_skip': False, 'use_salam': False,
+                'can_media': has_media, 'adapted_message': message,
+                'actions': [], 'reason': 'مجموعة آمنة ✅'
+            }
+
+        # 4. رسالة أصبحت فارغة → تخطي
+        if not adapted or not adapted.strip():
+            return {
+                'should_skip': True, 'use_salam': False,
+                'can_media': False, 'adapted_message': '',
+                'actions': actions, 'reason': 'الرسالة فارغة بعد التكييف'
+            }
+
+        # 5. المحمية ببوتات → salam بالرسالة المعدّلة
+        if has_bots:
+            return {
+                'should_skip': False, 'use_salam': True,
+                'can_media': False,
+                'adapted_message': adapted,
+                'actions': actions, 'reason': f'بوتات حماية ({len(protection_bots)}) → إرسال ذكي (salam)'
+            }
+
+        # 6. قيود أخرى (كلمات/روابط/هواتف/وسائط) بدون بوتات → إرسال مباشر بالرسالة المعدّلة
+        return {
+            'should_skip': False, 'use_salam': False,
+            'can_media': can_media, 'adapted_message': adapted,
+            'actions': actions, 'reason': 'معدّلة حسب قيود المجموعة 🛡️'
+        }
+
+    def _launch_salam(self, user_id, client_manager, entity_obj, entity_label, final_message, wait_for_completion=False, cancel_event=None):
+        """تشغيل الإرسال الذكي salam في خيط مستقل"""
+        group_id = getattr(entity_obj, 'id', None) or hash(str(entity_label))
+        key = f"{user_id}_{group_id}"
+        if key in self._smart_running:
+            return {"success": True, "skipped": False, "smart": True,
+                    "message": "⚠️ دورة ذكية قيد التشغيل لهذه المجموعة، ستُكمل عند انتهائها"}
+        self._smart_running.add(key)
+        t = _OSThread(
+            target=self._run_smart_protected_send,
+            args=(user_id, client_manager, entity_obj, entity_label, final_message, key, cancel_event),
+            daemon=True,
+            name=f"SmartSend-{key}"
+        )
+        t.start()
+        if wait_for_completion:
+            t.join(timeout=90)
+            return {"success": True, "smart": True,
+                    "message": f"🧠 اكتملت معالجة الإرسال الذكي لـ {entity_label}"}
+        else:
+            return {"success": True, "smart": True,
+                    "message": f"🧠 بدأ الإرسال الذكي لـ {entity_label} (أُرسلت 'السلام عليكم' وجارٍ استيفاء الشروط للتعديل تلقائياً)"}
+
+    def _do_send_message(self, client_manager, entity_obj, entity_label, message):
+        """إرسال رسالة نصية مباشرة مع دعم الانضمام التلقائي إذا لزم الأمر"""
+        try:
+            result = client_manager.run_coroutine(
+                client_manager.client.send_message(entity_obj, message, parse_mode='md')
+            )
+        except Exception as _send_err:
+            _err_str = str(_send_err).lower()
+            if "write" in _err_str or "forbidden" in _err_str or "not a member" in _err_str or "participant" in _err_str:
+                try:
+                    logger.info(f"Auto-joining {entity_label} before sending message...")
+                    from telethon.tl.functions.channels import JoinChannelRequest
+                    client_manager.run_coroutine(
+                        client_manager.client(JoinChannelRequest(entity_obj))
+                    )
+                    time.sleep(1)
+                    result = client_manager.run_coroutine(
+                        client_manager.client.send_message(entity_obj, message, parse_mode='md')
+                    )
+                except Exception as _join_err:
+                    raise Exception(f"لا يمكن الإرسال في {entity_label}: تتطلب الانضمام للمجموعة ({_join_err})")
+            else:
+                raise _send_err
+        return {"success": True, "message_id": result.id}
+
+    def _do_send_with_media(self, client_manager, entity_obj, entity_label, message, image_files):
+        """إرسال وسائط (صور مفردة أو ألبوم) مع نص اختياري"""
+        results = []
+        image_paths = []
+        if image_files:
+            for img_file in image_files:
+                p = img_file.get('path', '') if isinstance(img_file, dict) else str(img_file)
+                if os.path.exists(p):
+                    image_paths.append(p)
+                else:
+                    logger.warning(f"Image file not found: {p}")
+
+        if image_paths:
+            if len(image_paths) == 1:
+                media_result = client_manager.run_coroutine(
+                    client_manager.client.send_file(
+                        entity_obj,
+                        image_paths[0],
+                        caption=message if message and message.strip() else None,
+                        parse_mode='md'
+                    )
+                )
+                results.append(media_result.id)
+            else:
+                try:
+                    media_result = client_manager.run_coroutine(
+                        client_manager.client.send_file(
+                            entity_obj,
+                            image_paths,
+                            caption=message if message and message.strip() else None,
+                            parse_mode='md'
+                        )
+                    )
+                    if hasattr(media_result, '__iter__'):
+                        for res in media_result:
+                            results.append(res.id)
+                    else:
+                        results.append(media_result.id)
+                except Exception as album_error:
+                    logger.warning(f"Failed to send as album, sending individually: {album_error}")
+                    for i, img_path in enumerate(image_paths):
+                        try:
+                            cap = (message if message and message.strip() else None) if i == 0 else None
+                            media_result = client_manager.run_coroutine(
+                                client_manager.client.send_file(
+                                    entity_obj,
+                                    img_path,
+                                    caption=cap,
+                                    parse_mode='md'
+                                )
+                            )
+                            results.append(media_result.id)
+                        except Exception as img_error:
+                            logger.error(f"Error sending individual image {i+1}: {img_error}")
+                            continue
+        elif message and message.strip():
+            return self._do_send_message(client_manager, entity_obj, entity_label, message)
+        return {"success": True, "message_ids": results}
+
+    @staticmethod
+    def _action_for_safety_report(report):
+        """
+        تحديد الإجراء التلقائي بناءً على تقرير السلامة:
+        - salam: إذا كانت المجموعة بها بوتات حماية أو تفرض الإرسال الذكي
+        - sanitize: إذا كانت بها قيود كلمات أو روابط أو هواتف
+        - skip: إذا كانت محظورة كلياً
+        - send: إذا كانت آمنة
+        """
+        if not report:
+            return 'send'
+        protection_bots = report.get('protection_bots', [])
+        requires_smart = bool(report.get('requires_smart_send'))
+        is_prot = bool(
+            report.get('is_protected') or
+            report.get('blocks_ads') or
+            requires_smart or
+            protection_bots
+        )
+        if protection_bots or requires_smart:
+            return 'salam'
+        prohibited = set(report.get('prohibited_actions', []))
+        if prohibited or report.get('keywords_to_avoid') or is_prot:
+            return 'sanitize'
+        return 'send'
+
     def send_message_async(self, user_id, entity, message, forced_action=None, wait_for_completion=False, cancel_event=None):
         """
-        إرسال رسالة مع دعم الإجراء المختار مسبقاً من نافذة الفحص الاستباقي.
+        إرسال رسالة مع دعم الوضع الموحّد التلقائي (auto mode) أو الإجراء المختار مسبقاً.
         forced_action: 'skip' | 'sanitize' | 'salam' | 'send' | None
-          None  → استخدم الإعدادات الافتراضية للمستخدم
         """
         try:
             with USERS_LOCK:
@@ -4576,104 +4783,71 @@ class TelegramManager:
                 raise Exception(f"خطأ في التحقق من التصريح: {str(auth_error)}")
 
             entity_obj = self._resolve_entity(client_manager, entity)
+            settings = load_settings(user_id) or {}
+            mode = (settings.get('sanitize_mode') or 'auto').lower()
 
-            # ── 1. جلب التقرير من قاعدة البيانات الخارجية (Firestore) أو فحصه وحفظه إن كانت جديدة ──
+            # ── الإجراءات المحددة قسرياً ──
+            if forced_action == 'skip':
+                socketio.emit('log_update', {
+                    "message": f"⏭️ تم تخطي {entity} (قرار الفحص الاستباقي)"
+                }, to=user_id)
+                return {"success": False, "skipped": True, "message": f"تم تخطي المجموعة: {entity}"}
+            elif forced_action == 'salam':
+                return self._launch_salam(user_id, client_manager, entity_obj, entity, message,
+                                          wait_for_completion=wait_for_completion, cancel_event=cancel_event)
+            elif forced_action == 'send':
+                return self._do_send_message(client_manager, entity_obj, entity, message)
+
+            # الوضع معطّل (off)
+            if mode == 'off':
+                return self._do_send_message(client_manager, entity_obj, entity, message)
+
+            # ── 1. جلب أو فحص تقرير أمان المجموعة ──
             report, is_new = self.get_or_create_group_safety_report(
                 user_id, client_manager, entity_obj, entity, sample_message=message
             )
 
-            # ── 2. تكييف الرسالة وتغيير أو حذف الكلمات والعبارات التي تستدعي الحظر ──
-            final_message, _, safety_actions = self.adapt_message_to_group_report(
-                message, report, has_media=False
-            )
-            if safety_actions:
-                socketio.emit('log_update', {
-                    "message": f"🛡️ [{entity}] تطبيق إجراءات الأمان للرسالة: {', '.join(safety_actions[:2])}"
-                }, to=user_id)
-
-            # ── 3. فحص هل المجموعة تحتوي على أي بوت -> استخدام خاصية الإرسال الذكي حتماً ──
-            has_bots = bool(
-                len(report.get('protection_bots', [])) > 0 or
-                report.get('is_protected') or
-                report.get('requires_smart_send')
-            )
-            needs_smart = has_bots or bool(report.get('requires_smart_send'))
-
-            # ── تحديد الإجراء: إجبار الإرسال الذكي إذا احتوت المجموعة على أي بوت ──────────
-            if has_bots or needs_smart:
-                action = 'salam'
-            elif forced_action is not None:
-                action = forced_action
-                if action == 'skip':
+            # ── 2. القرار التلقائي الموحّد (auto mode أو salam الافتراضي) ──
+            if mode in ('auto', 'salam'):
+                plan = self._prepare_smart_send(user_id, message, report, has_media=False)
+                if plan['actions']:
                     socketio.emit('log_update', {
-                        "message": f"⏭️ تم تخطي {entity} (قرار الفحص الاستباقي)"
+                        "message": f"🛡️ [{entity}] تطبيق إجراءات الأمان: {', '.join(plan['actions'][:2])}"
                     }, to=user_id)
-                    return {"success": False, "skipped": True,
-                            "message": f"تم تخطي المجموعة: {entity}"}
-            else:
-                action, _ = self._check_group_protection(user_id, client_manager, entity_obj, entity)
 
-            # ── الإرسال الذكي للمجموعات التي بها بوتات (وضع salam) ──
-            if action == 'salam' or needs_smart or has_bots:
-                group_id = getattr(entity_obj, 'id', None) or hash(str(entity))
-                key = f"{user_id}_{group_id}"
-                if key in self._smart_running:
-                    return {"success": True, "skipped": False, "smart": True,
-                            "message": "⚠️ دورة ذكية قيد التشغيل لهذه المجموعة، ستُكمل عند انتهائها"}
-                self._smart_running.add(key)
-                t = _OSThread(
-                    target=self._run_smart_protected_send,
-                    args=(user_id, client_manager, entity_obj, entity, final_message, key, cancel_event),
-                    daemon=True,
-                    name=f"SmartSend-{key}"
-                )
-                t.start()
-                if wait_for_completion:
-                    # في وضع الإرسال الجماعي (Batch)، ننتظر حتى ينتهي الإرسال الذكي بحد أقصى آمن
-                    t.join(timeout=90)
-                    return {"success": True, "smart": True,
-                            "message": f"🧠 اكتملت معالجة الإرسال الذكي لـ {entity}"}
-                else:
-                    return {"success": True, "smart": True,
-                            "message": f"🧠 بدأ الإرسال الذكي لـ {entity} (أُرسلت 'السلام عليكم' وجارٍ استيفاء الشروط للتعديل تلقائياً)"}
+                if plan['should_skip']:
+                    socketio.emit('log_update', {
+                        "message": f"⏭️ تم تخطي {entity}: {plan['reason']}"
+                    }, to=user_id)
+                    return {"success": False, "skipped": True, "message": plan['reason']}
 
-            # نمرر action مباشرة لتجنب استدعاء _check_group_protection مرة ثانية
+                if plan['use_salam']:
+                    return self._launch_salam(user_id, client_manager, entity_obj, entity,
+                                              plan['adapted_message'],
+                                              wait_for_completion=wait_for_completion,
+                                              cancel_event=cancel_event)
+
+                return self._do_send_message(client_manager, entity_obj, entity, plan['adapted_message'])
+
+            # الأوضاع اليدوية السابقة للتوافق (skip, smart, always)
+            if mode == 'skip':
+                is_prot = bool(report.get('is_protected') or report.get('protection_bots') or report.get('requires_smart_send'))
+                if is_prot:
+                    return {"success": False, "skipped": True, "message": f"تم تخطي المجموعة المحمية: {entity}"}
+                return self._do_send_message(client_manager, entity_obj, entity, message)
+
             cleaned_message = self._maybe_sanitize(
-                user_id, client_manager, entity_obj, entity, final_message,
-                forced_action=action
+                user_id, client_manager, entity_obj, entity, message, forced_action=forced_action
             )
             if cleaned_message is None:
-                return {"success": False, "skipped": True,
-                        "message": "تم تخطي الإرسال: المجموعة محمية أو الرسالة فارغة بعد التنقية"}
+                return {"success": False, "skipped": True, "message": "تم تخطي الإرسال: المجموعة محمية أو الرسالة فارغة"}
 
-            try:
-                result = client_manager.run_coroutine(
-                    client_manager.client.send_message(entity_obj, cleaned_message, parse_mode='md')
-                )
-            except Exception as _send_err:
-                _err_str = str(_send_err).lower()
-                # إذا تطلب الإرسال الانضمام للمجموعة أولاً
-                if "write" in _err_str or "forbidden" in _err_str or "not a member" in _err_str or "participant" in _err_str:
-                    try:
-                        logger.info(f"Auto-joining {entity} before sending message...")
-                        from telethon.tl.functions.channels import JoinChannelRequest
-                        client_manager.run_coroutine(
-                            client_manager.client(JoinChannelRequest(entity_obj))
-                        )
-                        time.sleep(1)
-                        result = client_manager.run_coroutine(
-                            client_manager.client.send_message(entity_obj, cleaned_message, parse_mode='md')
-                        )
-                    except Exception as _join_err:
-                        raise Exception(f"لا يمكن الإرسال في {entity}: تتطلب الانضمام للمجموعة ({_join_err})")
-                else:
-                    raise _send_err
-
-            return {"success": True, "message_id": result.id}
+            return self._do_send_message(client_manager, entity_obj, entity, cleaned_message)
 
         except Exception as e:
             logger.error(f"Send message error: {str(e)}")
             raise Exception(str(e))
+
 
     def get_or_create_group_safety_report(self, user_id, client_manager, entity_obj, entity_label, sample_message=None):
         """
@@ -4754,7 +4928,7 @@ class TelegramManager:
             "keywords_to_avoid": ai_res.get('keywords_to_avoid', []),
             "actions_taken": ai_res.get('actions_taken', []),
             "summary_ar": ai_res.get('summary_ar', ''),
-            "recommended_action": 'salam' if requires_smart_send else ('sanitize' if is_prot else 'send'),
+            "recommended_action": TelegramManager._action_for_safety_report(new_report),
             "can_send_media": bool(ai_res.get('can_send_media', True) and 'no_media' not in prohibited),
             "analyzed_at": time.strftime('%Y-%m-%d %H:%M:%S')
         }
@@ -4847,12 +5021,16 @@ class TelegramManager:
         """
         try:
             settings = load_settings(user_id)
-            mode = (settings.get('sanitize_mode') or 'salam').lower()
+            mode = (settings.get('sanitize_mode') or 'auto').lower()
 
             if mode == 'off':
                 return 'send', None
 
             report, _ = self.get_or_create_group_safety_report(user_id, client_manager, entity_obj, entity_label)
+
+            if mode == 'auto':
+                action = TelegramManager._action_for_safety_report(report)
+                return action, report.get('summary_ar')
 
             is_prot = bool(report.get('is_protected', False))
             bots_list = report.get('protection_bots', []) or []
@@ -5267,33 +5445,25 @@ class TelegramManager:
                 raise Exception("العميل غير مصرح")
 
             entity_obj = self._resolve_entity(client_manager, entity)
+            settings = load_settings(user_id) or {}
+            mode = (settings.get('sanitize_mode') or 'auto').lower()
 
-            action, _reason = self._check_group_protection(user_id, client_manager, entity_obj, entity)
-            if action == 'skip':
-                return {"success": False, "skipped": True,
-                        "message": f"تم تخطي المجموعة المحمية: {entity}"}
+            if mode == 'off':
+                return self._do_send_with_media(client_manager, entity_obj, entity, "", image_files)
 
-            results = []
-            paths = [f['path'] for f in image_files if os.path.exists(f.get('path', ''))]
-            if not paths:
-                raise Exception("لا توجد ملفات صور صالحة")
+            report, is_new = self.get_or_create_group_safety_report(
+                user_id, client_manager, entity_obj, entity, sample_message=""
+            )
 
-            if len(paths) == 1:
-                result = client_manager.run_coroutine(
-                    client_manager.client.send_file(entity_obj, paths[0])
-                )
-                results.append(result.id)
-            else:
-                media_result = client_manager.run_coroutine(
-                    client_manager.client.send_file(entity_obj, paths)
-                )
-                if hasattr(media_result, '__iter__'):
-                    for r in media_result:
-                        results.append(r.id)
-                else:
-                    results.append(media_result.id)
+            plan = self._prepare_smart_send(user_id, "", report, has_media=True)
+            if plan['should_skip'] or not plan['can_media'] or plan['use_salam']:
+                reason = "المجموعة تحظر الوسائط أو محمية ببوتات" if (not plan['can_media'] or plan['use_salam']) else plan['reason']
+                socketio.emit('log_update', {
+                    "message": f"⏭️ تم تخطي إرسال الوسائط إلى {entity}: {reason}"
+                }, to=user_id)
+                return {"success": False, "skipped": True, "message": f"تم تخطي إرسال الصور: {reason}"}
 
-            return {"success": True, "message_ids": results}
+            return self._do_send_with_media(client_manager, entity_obj, entity, "", image_files)
 
         except Exception as e:
             logger.error(f"Send media error: {str(e)}")
@@ -5317,82 +5487,46 @@ class TelegramManager:
                 raise Exception("العميل غير مصرح")
 
             entity_obj = self._resolve_entity(client_manager, entity)
+            settings = load_settings(user_id) or {}
+            mode = (settings.get('sanitize_mode') or 'auto').lower()
 
-            if message:
-                _cleaned = self._maybe_sanitize(user_id, client_manager, entity_obj, entity, message)
-                if _cleaned is None:
-                    return {"success": False, "skipped": True,
-                            "message": "تم تخطي الإرسال: الرسالة بعد التنقية أصبحت فارغة"}
-                message = _cleaned
+            if mode == 'off':
+                return self._do_send_with_media(client_manager, entity_obj, entity, message, image_files)
 
-            results = []
+            report, is_new = self.get_or_create_group_safety_report(
+                user_id, client_manager, entity_obj, entity, sample_message=message
+            )
 
-            if image_files and len(image_files) > 0:
-                try:
-                    image_paths = []
-                    for img_file in image_files:
-                        if os.path.exists(img_file['path']):
-                            image_paths.append(img_file['path'])
-                        else:
-                            logger.warning(f"Image file not found: {img_file['path']}")
+            plan = self._prepare_smart_send(user_id, message, report, has_media=bool(image_files))
+            if plan['actions']:
+                socketio.emit('log_update', {
+                    "message": f"🛡️ [{entity}] تطبيق إجراءات الأمان: {', '.join(plan['actions'][:2])}"
+                }, to=user_id)
 
-                    if image_paths:
-                        if len(image_paths) == 1:
-                            media_result = client_manager.run_coroutine(
-                                client_manager.client.send_file(
-                                    entity_obj, 
-                                    image_paths[0],
-                                    caption=message if message else "📷",
-                                    parse_mode='md'
-                                )
-                            )
-                            results.append(media_result.id)
-                            logger.info(f"Successfully sent single image with message to {entity}")
-                        else:
-                            try:
-                                media_result = client_manager.run_coroutine(
-                                    client_manager.client.send_file(
-                                        entity_obj,
-                                        image_paths,
-                                        caption=message if message and message.strip() else None,
-                                        parse_mode='md'
-                                    )
-                                )
-                                if hasattr(media_result, '__iter__'):
-                                    for result in media_result:
-                                        results.append(result.id)
-                                else:
-                                    results.append(media_result.id)
-                                logger.info(f"Successfully sent {len(image_paths)} images as album to {entity}")
-                            except Exception as album_error:
-                                logger.warning(f"Failed to send as album, sending individually: {str(album_error)}")
-                                for i, img_path in enumerate(image_paths):
-                                    try:
-                                        cap = (message if message and message.strip() else None) if i == 0 else None
-                                        media_result = client_manager.run_coroutine(
-                                            client_manager.client.send_file(
-                                                entity_obj,
-                                                img_path,
-                                                caption=cap,
-                                                parse_mode='md'
-                                            )
-                                        )
-                                        results.append(media_result.id)
-                                    except Exception as img_error:
-                                        logger.error(f"Error sending individual image {i+1}: {str(img_error)}")
-                                        continue
-                except Exception as media_error:
-                    logger.error(f"Error in media sending process: {str(media_error)}")
-                    raise Exception(f"فشل إرسال الصورة: {str(media_error)[:100]}")
+            if plan['should_skip']:
+                socketio.emit('log_update', {
+                    "message": f"⏭️ تم تخطي {entity}: {plan['reason']}"
+                }, to=user_id)
+                return {"success": False, "skipped": True, "message": plan['reason']}
+
+            if plan['use_salam']:
+                socketio.emit('log_update', {
+                    "message": f"🤖 [{entity}] {plan['reason']} — تشغيل الإرسال الذكي salam بالرسالة المعدلة (بدون صور)"
+                }, to=user_id)
+                return self._launch_salam(user_id, client_manager, entity_obj, entity,
+                                          plan['adapted_message'],
+                                          wait_for_completion=False)
+
+            active_images = image_files if plan['can_media'] else []
+            if image_files and not plan['can_media']:
+                socketio.emit('log_update', {
+                    "message": f"🖼️ [{entity}] المجموعة تحظر الصور — إرسال النص فقط"
+                }, to=user_id)
+
+            if active_images:
+                return self._do_send_with_media(client_manager, entity_obj, entity, plan['adapted_message'], active_images)
             else:
-                if message and message.strip():
-                    text_result = client_manager.run_coroutine(
-                        client_manager.client.send_message(entity_obj, message)
-                    )
-                    results.append(text_result.id)
-                    logger.info(f"Successfully sent text message to {entity}")
-
-            return {"success": True, "message_ids": results}
+                return self._do_send_message(client_manager, entity_obj, entity, plan['adapted_message'])
 
         except Exception as e:
             logger.error(f"Send message with media error: {str(e)}")
@@ -6785,11 +6919,11 @@ def api_save_settings():
         })
 
     current_settings = load_settings(user_id)
-    old_mode = current_settings.get('sanitize_mode', 'salam')
-    new_mode = (data.get('sanitize_mode') or 'salam').lower()
+    old_mode = current_settings.get('sanitize_mode', 'auto')
+    new_mode = (data.get('sanitize_mode') or 'auto').lower()
 
-    # إذا تغيّر الوضع من salam إلى غيره، أوقف جميع الدورات الذكية النشطة لهذا المستخدم
-    if old_mode == 'salam' and new_mode != 'salam':
+    # إذا تغيّر الوضع من الوضع الذكي إلى غيره، أوقف جميع الدورات الذكية النشطة لهذا المستخدم
+    if old_mode in ('salam', 'auto') and new_mode not in ('salam', 'auto'):
         keys_to_remove = [k for k in list(telegram_manager._smart_running) if k.startswith(f"{user_id}_")]
         for k in keys_to_remove:
             telegram_manager._smart_running.discard(k)
@@ -7823,22 +7957,14 @@ def _execute_batch_send(user_id, groups_list, message, image_files, batch_interv
                         skipped_count += 1
                         continue
 
-                # 3. التحقق من تقرير الأمان وتكييف الرسالة
+                # 3. التحقق من تقرير الأمان وتحديد قرار الإرسال الذكي التلقائي الموحّد
                 report, is_new = telegram_manager.get_or_create_group_safety_report(
                     user_id, cm, entity_obj, group, sample_message=message
                 )
-                curr_message, can_media, safety_actions = telegram_manager.adapt_message_to_group_report(
-                    message, report, has_media=bool(image_files)
-                )
-                curr_images = image_files if can_media else []
-                if safety_actions:
-                    socketio.emit('log_update', {
-                        "message": f"🛡️ [{i}/{len(groups_list)}] تلافي مسببات الحظر في {group}: {', '.join(safety_actions[:2])}"
-                    }, to=user_id)
 
                 # إذا حدد المستخدم إجراء التخطي المسبق
                 if pre_scan_action == 'skip':
-                    skip_msg = f"⏭️ [{i}/{len(groups_list)}] تم تخطي {group} (بناءً على اختيارك)"
+                    skip_msg = f"⏭️ [{i}/{len(groups_list)}] تم تخطي {group} (بناءً على اختيار المستخدم)"
                     socketio.emit('log_update', {"message": skip_msg}, to=user_id)
                     socketio.emit('send_progress', {
                         "group": group,
@@ -7852,20 +7978,49 @@ def _execute_batch_send(user_id, groups_list, message, image_files, batch_interv
                     skipped_count += 1
                     continue
 
-                # 4. فحص هل المجموعة تحتوي على أي بوت -> استخدام خاصية الإرسال الذكي حتماً
-                has_bots = bool(
-                    len(report.get('protection_bots', [])) > 0 or
-                    report.get('is_protected') or
-                    report.get('requires_smart_send')
-                )
-                needs_smart = has_bots or bool(report.get('requires_smart_send'))
+                user_settings = load_settings(user_id) or {}
+                send_mode = (user_settings.get('sanitize_mode') or 'auto').lower()
 
-                if has_bots or needs_smart or pre_scan_action == 'salam' or force_salam:
-                    action_to_use = 'salam'
+                if pre_scan_action == 'salam' or force_salam:
+                    use_salam = True
+                    curr_message = message
+                    curr_images = []
+                    plan_actions = ["إجبار الإرسال الذكي (salam)"]
+                elif send_mode == 'off':
+                    use_salam = False
+                    curr_message = message
+                    curr_images = image_files
+                    plan_actions = []
                 else:
-                    action_to_use = 'send'
+                    plan = telegram_manager._prepare_smart_send(
+                        user_id, message, report, has_media=bool(image_files)
+                    )
+                    plan_actions = plan.get('actions', [])
+                    if plan.get('should_skip'):
+                        skip_msg = f"⏭️ [{i}/{len(groups_list)}] تم تخطي {group}: {plan['reason']}"
+                        socketio.emit('log_update', {"message": skip_msg}, to=user_id)
+                        socketio.emit('send_progress', {
+                            "group": group,
+                            "index": i,
+                            "total": len(groups_list),
+                            "status": "skipped",
+                            "reason": f"تم التخطي: {plan['reason']}",
+                            "emoji": "⏭️",
+                            "message": skip_msg
+                        }, to=user_id)
+                        skipped_count += 1
+                        continue
 
-                # 5. محاولة الإرسال مع معالجة FloodWaitError وإعادة المحاولة لمرة واحدة (P2)
+                    use_salam = plan.get('use_salam', False)
+                    curr_message = plan.get('adapted_message', message)
+                    curr_images = image_files if plan.get('can_media', True) else []
+
+                if plan_actions:
+                    socketio.emit('log_update', {
+                        "message": f"🛡️ [{i}/{len(groups_list)}] إجراءات الأمان لـ {group}: {', '.join(plan_actions[:2])}"
+                    }, to=user_id)
+
+                # 4. محاولة الإرسال مع معالجة FloodWaitError وإعادة المحاولة لمرة واحدة (P2)
                 send_attempts = 0
                 max_send_attempts = 2
                 result = None
@@ -7873,25 +8028,26 @@ def _execute_batch_send(user_id, groups_list, message, image_files, batch_interv
                 while send_attempts < max_send_attempts:
                     send_attempts += 1
                     try:
-                        if action_to_use == 'salam':
+                        if use_salam:
                             socketio.emit('log_update', {
-                                "message": f"🤖 [{i}/{len(groups_list)}] جاري الإرسال بوضع salam لـ {group}..."
+                                "message": f"🤖 [{i}/{len(groups_list)}] تشغيل الإرسال الذكي salam لـ {group}..."
                             }, to=user_id)
-                            result = telegram_manager.send_message_async(
-                                user_id, group, curr_message, forced_action='salam',
-                                wait_for_completion=is_batch, cancel_event=cancel_event
+                            # في الإرسال الجماعي: إطلاق salam في الخلفية دون حجب باقي المجموعات
+                            result = telegram_manager._launch_salam(
+                                user_id, cm, entity_obj, group, curr_message,
+                                wait_for_completion=False, cancel_event=cancel_event
                             )
                         elif curr_images and curr_message:
-                            result = telegram_manager.send_message_with_media_async(
-                                user_id, group, curr_message, curr_images
+                            result = telegram_manager._do_send_with_media(
+                                cm, entity_obj, group, curr_message, curr_images
                             )
                         elif curr_images:
-                            result = telegram_manager.send_media_async(
-                                user_id, group, curr_images
+                            result = telegram_manager._do_send_with_media(
+                                cm, entity_obj, group, "", curr_images
                             )
                         else:
-                            result = telegram_manager.send_message_async(
-                                user_id, group, curr_message, forced_action='send'
+                            result = telegram_manager._do_send_message(
+                                cm, entity_obj, group, curr_message
                             )
                         break
                     except FloodWaitError as fwe:

@@ -1522,14 +1522,16 @@
                                     وضع الإرسال عند المجموعات المحمية
                                 </label>
                                 <select class="form-select" id="sanitizeMode">
-                                    <option value="salam"  {{ 'selected' if (settings.sanitize_mode or 'salam') == 'salam'  else '' }}>🤖 ذكي (salam) — أرسل "السلام عليكم" ثم عدّل عند النشاط ✅ افتراضي</option>
+                                    <option value="auto"   {{ 'selected' if (settings.sanitize_mode or 'auto') == 'auto'   else '' }}>⚡ ذكي موحّد (Auto) — تلقائي: حماية، تعديل، تنقية روابط ✅ موصى به</option>
+                                    <option value="salam"  {{ 'selected' if settings.sanitize_mode == 'salam'  else '' }}>🤖 ذكي (salam) — أرسل "السلام عليكم" ثم عدّل عند النشاط</option>
                                     <option value="skip"   {{ 'selected' if settings.sanitize_mode == 'skip'   else '' }}>⏭️ تخطي — لا ترسل للمجموعات المحمية</option>
                                     <option value="smart"  {{ 'selected' if settings.sanitize_mode == 'smart'  else '' }}>🧠 ذكية — ينقّي الرسالة (يحذف روابط/أرقام)</option>
                                     <option value="always" {{ 'selected' if settings.sanitize_mode == 'always' else '' }}>🛡️ تنقية — أرسل مع حذف الروابط دائماً</option>
                                     <option value="off"    {{ 'selected' if settings.sanitize_mode == 'off'    else '' }}>🚫 معطّل — أرسل كما هي (خطر حظر)</option>
                                 </select>
                                 <div class="form-text">
-                                    <strong>🤖 ذكي (salam) [افتراضي]:</strong> يرسل "السلام عليكم" أولاً، ينتظر مدة interval، فإن وصلت ≥3 رسائل عدّل إلى رسالتك، وإلا حذف وأعاد الدورة. يُوقف تلقائياً عند تغيير الوضع. <br>
+                                    <strong>⚡ ذكي موحّد (Auto) [موصى به]:</strong> قرار ذكي تلقائي يجمع كل الخواص معاً: إن وُجدت بوتات حماية يستخدم سلام، وإن وُجدت قيود كلمات أو روابط أو هواتف يتم تكييفها وتنقيتها وإرسالها مباشرة، وإن حُظرت الوسائط تُلغى الصور تلقائياً.<br>
+                                    <strong>🤖 ذكي (salam):</strong> يرسل "السلام عليكم" أولاً، ينتظر مدة interval، فإن وصلت ≥3 رسائل عدّل إلى رسالتك، وإلا حذف وأعاد الدورة.<br>
                                     <strong>⏭️ تخطي:</strong> يتجاهل المجموعات المحمية تماماً — الأأمن للحساب. <br>
                                     <strong>🧠 ذكية:</strong> يحذف الروابط والأرقام تلقائياً قبل الإرسال للمجموعات المحمية. <br>
                                     <strong>🛡️ تنقية:</strong> يحذف الروابط من كل رسالة لجميع المجموعات. <br>
@@ -12068,7 +12070,7 @@ document.addEventListener('DOMContentLoaded', function() {
         keyword_auto_reply_in_group: byId('keywordAutoReplyInGroup') ? byId('keywordAutoReplyInGroup').checked : false,
         keyword_auto_reply_in_dm: byId('keywordAutoReplyInDm') ? byId('keywordAutoReplyInDm').checked : true,
         alert_target_user: (byId('alertTargetUser')?.value || 'me').trim(),
-        sanitize_mode: byId('sanitizeMode')?.value || 'salam',
+        sanitize_mode: byId('sanitizeMode')?.value || 'auto',
         send_type: byId('sendType')?.value || 'manual',
         interval_seconds: Math.max(60, Math.round(num('intervalSeconds', 25) * 60)),
         schedule_duration_hours: num('scheduleDuration', 2.0) || 2.0,
