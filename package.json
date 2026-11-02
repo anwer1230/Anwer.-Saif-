@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "PORT=3000 python3 main.py",
-    "start": "PORT=3000 python3 main.py",
+    "dev": "PORT=3000 PYTHONPATH=vendor python3 main.py",
+    "start": "PORT=3000 PYTHONPATH=vendor python3 main.py",
     "build": "python3 build_artifacts.py"
   },
   "dependencies": {

@@ -63,3 +63,4 @@ build/
 *.keystore
 vendor/
 .venv/
+*.bak*

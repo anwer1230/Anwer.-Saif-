@@ -5,52 +5,55 @@ import subprocess
 import signal
 import logging
 
-# ضمان توفر مسار vendor الدائم للحزم حتى عند إعادة إنشاء الحاوية
-_vendor_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor")
+# ضمان توفر مسار vendor الدائم للحزم
+_vendor_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "vendor"))
 if os.path.isdir(_vendor_dir) and _vendor_dir not in sys.path:
     sys.path.insert(0, _vendor_dir)
 
-# التأكد التلقائي من توفر الحزم الأساسية لمنع أي عطل عند إعادة تشغيل البيئة
 try:
     import requests
     import flask
     import flask_socketio
-except ImportError:
-    print("⏳ جارٍ تهيئة وتثبيت حزم بايثون الأساسية تلقائياً...")
-    try:
-        subprocess.run(["pip", "install", "--break-system-packages", "-r", "requirements.txt"], check=True)
-    except Exception:
-        subprocess.run(["sh", "-c", "curl -sS https://bootstrap.pypa.io/get-pip.py | python3 - --break-system-packages && pip install --break-system-packages -r requirements.txt"], check=True)
+    from telethon.sessions import Session
+except ImportError as _imp_err:
+    print(f"⚠️ تنبيه استيراد الحزم: {_imp_err}")
 
 from app import app, socketio
 
 def free_port(port):
-    """تحرير المنفذ إذا كان مشغولاً (للبيئات المحلية فقط)"""
+    """تحرير المنفذ إذا كان مشغولاً"""
     try:
         if os.environ.get('RENDER'):
             return
-            
-        import socket
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        result = s.connect_ex(('127.0.0.1', port))
-        s.close()
-        if result == 0:
-            import subprocess
-            subprocess.run(['fuser', '-k', f'{port}/tcp'], capture_output=True)
-            import time
-            time.sleep(1)
+
+        import psutil
+        current_pid = os.getpid()
+        for conn in psutil.net_connections(kind='inet'):
+            if conn.laddr and conn.laddr.port == port:
+                if conn.pid and conn.pid != current_pid:
+                    try:
+                        p = psutil.Process(conn.pid)
+                        p.terminate()
+                        p.wait(timeout=2)
+                    except Exception:
+                        try:
+                            os.kill(conn.pid, signal.SIGKILL)
+                        except Exception:
+                            pass
+        import time
+        time.sleep(0.5)
     except Exception:
         pass
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 3000))
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     
     if os.environ.get('RENDER'):
+        port = int(os.environ.get("PORT", 3000))
         print(f"🌐 تشغيل Abu_Malk-Services على المنفذ {port} في بيئة Render")
         socketio.run(app, host='0.0.0.0', port=port, allow_unsafe_werkzeug=True)
     else:
+        port = int(os.environ.get("APP_PORT", os.environ.get("PORT", 3000)))
         free_port(port)
         print(f"🌐 تشغيل Abu_Malk-Services على المنفذ {port}")
         socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)

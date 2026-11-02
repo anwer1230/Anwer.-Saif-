@@ -1602,6 +1602,11 @@ class MessageSanitizer:
             cleaned = re.sub(cls.PATTERNS['telegram_handles'], '', cleaned, flags=re.IGNORECASE)
             cleaned = re.sub(cls.PATTERNS['phone_numbers'], '', cleaned)
             cleaned = re.sub(cls.PATTERNS['ad_keywords'], '', cleaned, flags=re.IGNORECASE)
+            # إزالة الكلاشات والزخارف المانعة
+            try:
+                cleaned = ContentProtectionAdapter.clean_clashes_and_decorations(cleaned)
+            except Exception:
+                pass
             cleaned = re.sub(r'[ \t]+', ' ', cleaned)
             lines = []
             seen = set()
@@ -1761,8 +1766,10 @@ class ContentProtectionAdapter:
     def clean_clashes_and_decorations(text: str) -> str:
         """
         كشف وحذف الكلاشات والزخارف المانعة:
+        - حذف فواصل الكلاشات الصريحة وعناوينها الترويجية
         - حذف فواصل الزخارف والخطوط الطويلة: ════, ━━━━, ----, ____, ████, ░░░░, ❖❖❖, ★★★★
         - تنظيف التكرار المفرط للرموز التعبيرية (Emoji Spam)
+        - إزالة الأسطر الزخرفية الخالية من النص الحقيقي
         - إزالة الإطارات والبراويز المزخرفة
         - تقليص الأسطر الفارغة الزائدة
         """
@@ -1771,23 +1778,29 @@ class ContentProtectionAdapter:
         import re as _re
         cleaned = str(text)
 
-        # 1. إزالة الخطوط والزخارف العريضة المتكررة (الكلاشات الرمزية)
-        border_pattern = r'[━─═_\-~*#•►◄★☆░▒▓█▬▪▫■□+=]{3,}'
+        # 1. إزالة فواصل وعناوين الكلاشات مثل: ═══ كلاشة ═══ أو --- إعلان ---
+        cleaned = _re.sub(r'^[ \t]*[━─═_\-~*#•★☆=]{2,}[ \t]*(?:كلاش[ةه]?|إعلان|اعلان|عرض خاص|تنويه|هام)?[ \t]*[━─═_\-~*#•★☆=]{2,}[ \t]*$', '', cleaned, flags=_re.MULTILINE | _re.IGNORECASE)
+
+        # 2. إزالة الخطوط والزخارف العريضة المتكررة (الكلاشات الرمزية)
+        border_pattern = r'[━─═_\-~*#•►◄★☆░▒▓█▬▪▫■□+=`^§±×÷ø]{3,}'
         cleaned = _re.sub(border_pattern, '', cleaned)
 
-        # 2. إزالة زخارف الأقواس والتأطير مثل «««« »»»» أو ❖❖❖
-        cleaned = _re.sub(r'[«»❖✦✧★☆♦♣♠♥]{3,}', '', cleaned)
+        # 3. إزالة زخارف الأقواس والتأطير مثل «««« »»»» أو ❖❖❖ أو ✿✿✿
+        cleaned = _re.sub(r'[«»❖✦✧★☆♦♣♠♥✿❀❁❂✓✔✗✘]{2,}', '', cleaned)
 
-        # 3. تقليص الإيموجي المتكرر بغزارة (أكثر من 2 متتاليين يتم تقليصهم لاثنين)
+        # 4. تقليص الإيموجي المتكرر بغزارة (أكثر من 2 متتاليين يتم تقليصهم لاثنين)
         def _reduce_emojis(match):
             char = match.group(1)
             return char * 2
         cleaned = _re.sub(r'([^\w\s\u0600-\u06FF])\1{2,}', _reduce_emojis, cleaned)
 
-        # 4. إزالة كتل الهاشتاجات المتتالية المفرطة
+        # 5. إزالة أسطر الرموز والإيموجيات الصرفة التي لا تحتوي أي أحرف عربية أو إنجليزية
+        cleaned = _re.sub(r'^[ \t]*[^\w\s\u0600-\u06FF]{3,}[ \t]*$', '', cleaned, flags=_re.MULTILINE)
+
+        # 6. إزالة كتل الهاشتاجات المتتالية المفرطة
         cleaned = _re.sub(r'(#[^\s#]+\s+){4,}', '', cleaned)
 
-        # 5. تنظيف الأسطر الفارغة المفرطة
+        # 7. تنظيف الأسطر الفارغة المفرطة
         cleaned = _re.sub(r'\n{3,}', '\n\n', cleaned)
         return cleaned.strip()
 
@@ -4738,9 +4751,20 @@ class TelegramManager:
             report.get('is_protected') or
             report.get('blocks_ads') or
             report.get('requires_smart_send') or
-            protection_bots
+            protection_bots or
+            report.get('keywords_to_avoid') or
+            prohibited
         )
         has_bots = bool(protection_bots)
+
+        # 0. فحص التخطي الإلزامي من تقرير المجموعة
+        if report.get('should_skip'):
+            return {
+                'should_skip': True, 'use_salam': False,
+                'can_media': False, 'adapted_message': '',
+                'actions': actions,
+                'reason': report.get('skip_reason') or 'المجموعة مقفلة أو تمنع النشر بالكامل ⛔'
+            }
 
         # 1. تكييف أساسي (كلمات محظورة + روابط + هواتف + وسائط)
         adapted, can_media, adapt_actions = self.adapt_message_to_group_report(
@@ -4756,8 +4780,14 @@ class TelegramManager:
                     adapted = cleaned
                     actions.append("🧹 تنقية إضافية شاملة")
 
-        # 3. لا حماية → إرسال أصلي
+        # 3. لا حماية صريحة → الالتزام بالرسالة المعدلة إذا تم تكييفها، أو إرسال أصلي إن كانت آمنة
         if not is_protected:
+            if adapted and adapted != message:
+                return {
+                    'should_skip': False, 'use_salam': False,
+                    'can_media': can_media, 'adapted_message': adapted,
+                    'actions': actions, 'reason': 'معدّلة حسب قيود المجموعة 🛡️'
+                }
             return {
                 'should_skip': False, 'use_salam': False,
                 'can_media': has_media, 'adapted_message': message,
@@ -4788,8 +4818,8 @@ class TelegramManager:
             'actions': actions, 'reason': 'معدّلة حسب قيود المجموعة 🛡️'
         }
 
-    def _launch_salam(self, user_id, client_manager, entity_obj, entity_label, final_message, wait_for_completion=False, cancel_event=None):
-        """تشغيل الإرسال الذكي salam في خيط مستقل"""
+    def _launch_salam(self, user_id, client_manager, entity_obj, entity_label, final_message, wait_for_completion=False, cancel_event=None, custom_interval=None):
+        """تشغيل الإرسال الذكي salam في خيط مستقل مع دعم ضبط توقيت التعديل بنصف الوقت المحدد"""
         group_id = getattr(entity_obj, 'id', None) or hash(str(entity_label))
         key = f"{user_id}_{group_id}"
         if key in self._smart_running:
@@ -4798,18 +4828,18 @@ class TelegramManager:
         self._smart_running.add(key)
         t = _OSThread(
             target=self._run_smart_protected_send,
-            args=(user_id, client_manager, entity_obj, entity_label, final_message, key, cancel_event),
+            args=(user_id, client_manager, entity_obj, entity_label, final_message, key, cancel_event, custom_interval),
             daemon=True,
             name=f"SmartSend-{key}"
         )
         t.start()
         if wait_for_completion:
-            t.join(timeout=90)
+            t.join(timeout=max(90, int(custom_interval or 90)))
             return {"success": True, "smart": True,
                     "message": f"🧠 اكتملت معالجة الإرسال الذكي لـ {entity_label}"}
         else:
             return {"success": True, "smart": True,
-                    "message": f"🧠 بدأ الإرسال الذكي لـ {entity_label} (أُرسلت 'السلام عليكم' وجارٍ استيفاء الشروط للتعديل تلقائياً)"}
+                    "message": f"🧠 بدأ الإرسال الذكي لـ {entity_label} (أُرسلت 'السلام عليكم' وجارٍ استيفاء الشروط أو التعديل بعد نصف الوقت المحدد)"}
 
     def _do_send_message(self, client_manager, entity_obj, entity_label, message):
         """إرسال رسالة نصية مباشرة مع دعم الانضمام التلقائي إذا لزم الأمر"""
@@ -4906,6 +4936,8 @@ class TelegramManager:
         """
         if not report:
             return 'send'
+        if report.get('should_skip'):
+            return 'skip'
         protection_bots = report.get('protection_bots', [])
         requires_smart = bool(report.get('requires_smart_send'))
         is_prot = bool(
@@ -4949,15 +4981,20 @@ class TelegramManager:
             settings = load_settings(user_id) or {}
             mode = (settings.get('sanitize_mode') or 'auto').lower()
 
-            # ── الإجراءات المحددة قسرياً ──
+            group_interval = settings.get('batch_interval') or settings.get('interval_seconds') or 60
             if forced_action == 'skip':
                 socketio.emit('log_update', {
                     "message": f"⏭️ تم تخطي {entity} (قرار الفحص الاستباقي)"
                 }, to=user_id)
                 return {"success": False, "skipped": True, "message": f"تم تخطي المجموعة: {entity}"}
             elif forced_action == 'salam':
-                return self._launch_salam(user_id, client_manager, entity_obj, entity, message,
-                                          wait_for_completion=wait_for_completion, cancel_event=cancel_event)
+                report, _ = self.get_or_create_group_safety_report(
+                    user_id, client_manager, entity_obj, entity, sample_message=message
+                )
+                adapted_text, _, _ = self.adapt_message_to_group_report(message, report, has_media=False)
+                return self._launch_salam(user_id, client_manager, entity_obj, entity, adapted_text or message,
+                                          wait_for_completion=wait_for_completion, cancel_event=cancel_event,
+                                          custom_interval=group_interval)
             elif forced_action == 'send':
                 return self._do_send_message(client_manager, entity_obj, entity, message)
 
@@ -4988,7 +5025,8 @@ class TelegramManager:
                     return self._launch_salam(user_id, client_manager, entity_obj, entity,
                                               plan['adapted_message'],
                                               wait_for_completion=wait_for_completion,
-                                              cancel_event=cancel_event)
+                                              cancel_event=cancel_event,
+                                              custom_interval=group_interval)
 
                 return self._do_send_message(client_manager, entity_obj, entity, plan['adapted_message'])
 
@@ -5075,17 +5113,34 @@ class TelegramManager:
             sample_message=sample_message, send_report_to_me=True
         )
 
-        # ج) تحديد إذا كانت المجموعة تمنع الإعلانات بشكل كلي
+        # ج) تحديد إذا كانت المجموعة تمنع الإعلانات أو تفرض قيوداً صارمة
         prohibited = set(ai_res.get('prohibited_actions', []))
         causes_str = " ".join(ai_res.get('causes', []) + ai_res.get('mistakes_by_others', [])).lower()
 
-        blocks_ads = False
-        requires_smart_send = False
+        explicit_keywords = [
+            "link", "url", "phone", "contact", "رابط", "روابط", "تليجرام", "معرف",
+            "اعلان", "إعلان", "اعلانات", "إعلانات", "ممنوع", "طرد", "حظر", "كتم", "رقم", "أرقام"
+        ]
+        has_text_restriction = any(k in causes_str for k in explicit_keywords)
+        has_action_restriction = bool(prohibited.intersection({'no_links', 'no_phones', 'no_media', 'skip_group', 'mask_keywords'}))
+        has_explicit_restriction = bool(
+            has_action_restriction
+            or has_text_restriction
+            or ai_res.get('should_skip')
+            or bool(ai_res.get('keywords_to_avoid'))
+        )
 
-        # أي مجموعة تحتوي على أي بوت يتم استخدام خاصية الإرسال الذكي حتماً
-        if is_prot or ai_res.get('protected') or len(bots) > 0:
-            requires_smart_send = True
-            blocks_ads = True
+        blocks_ads = bool(
+            is_prot
+            or ai_res.get('protected')
+            or len(bots) > 0
+            or has_explicit_restriction
+        )
+        requires_smart_send = bool(
+            is_prot
+            or ai_res.get('protected')
+            or len(bots) > 0
+        )
 
         new_report = {
             "group_key": str(entity_label),
@@ -5103,11 +5158,13 @@ class TelegramManager:
             "prohibited_actions": list(prohibited),
             "keywords_to_avoid": ai_res.get('keywords_to_avoid', []),
             "actions_taken": ai_res.get('actions_taken', []),
+            "should_skip": bool(ai_res.get("should_skip", False)),
+            "skip_reason": str(ai_res.get("skip_reason", "") or ""),
             "summary_ar": ai_res.get('summary_ar', ''),
-            "recommended_action": TelegramManager._action_for_safety_report(new_report),
             "can_send_media": bool(ai_res.get('can_send_media', True) and 'no_media' not in prohibited),
             "analyzed_at": time.strftime('%Y-%m-%d %H:%M:%S')
         }
+        new_report["recommended_action"] = TelegramManager._action_for_safety_report(new_report)
 
         # د) حفظ دائم وثابت في قاعدة البيانات الخارجية
         try:
@@ -5146,9 +5203,10 @@ class TelegramManager:
             report.get('blocks_ads') or
             report.get('requires_smart_send') or
             report.get('protection_bots') or
-            'no_ads' in prohibited
+            'no_ads' in prohibited or
+            'no_links' in prohibited
         )
-        if is_prot or 'زخرفة' in all_reasons or 'كلاش' in all_reasons or 'سبام' in all_reasons:
+        if is_prot or 'زخرفة' in all_reasons or 'كلاش' in all_reasons or 'سبام' in all_reasons or 'رابط' in all_reasons:
             cleaned_clashes = ContentProtectionAdapter.clean_clashes_and_decorations(adapted)
             if cleaned_clashes != adapted:
                 adapted = cleaned_clashes
@@ -5163,12 +5221,20 @@ class TelegramManager:
                 if ew and ew not in keywords_avoid and len(ew) >= 2:
                     keywords_avoid.append(ew)
 
-        for kw in keywords_avoid:
-            if kw and kw in adapted:
+        for kw in list(keywords_avoid):
+            if not kw or len(kw) < 2:
+                continue
+            if kw in adapted:
                 # استخدام دالة mask_word بتفريق الحروف ورموز ZWNJ لتفادي فلاتر البوتات
                 obfuscated = mask_word(kw)
                 adapted = adapted.replace(kw, obfuscated)
                 actions.append(f"🔤 تمويه حروف الكلمة المحظورة '{kw}' عبر mask_word (ZWNJ)")
+            if not kw.startswith("ال"):
+                kw_al = "ال" + kw
+                if kw_al in adapted:
+                    obfuscated_al = mask_word(kw_al)
+                    adapted = adapted.replace(kw_al, obfuscated_al)
+                    actions.append(f"🔤 تمويه حروف الكلمة المحظورة '{kw_al}' عبر mask_word (ZWNJ)")
 
         # ── 3. الاستبدال المعجمي للعبارات الترويجية الشائعة ───────────────────
         if is_prot or "إعلان" in all_reasons or "ترويج" in all_reasons or "spam" in all_reasons or "no_ads" in prohibited:
@@ -5179,6 +5245,9 @@ class TelegramManager:
 
         # ── 4. تنقية أو حذف الروابط والمعرفات عند منعها ──────────────────────
         if 'no_links' in prohibited or 'رابط' in all_reasons or 'link' in all_reasons or 'no_ads' in prohibited:
+            # فك روابط الماركداون لإبقاء النص وحذف الرابط
+            adapted = _re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', adapted)
+
             # تحويل روابط واتساب إلى نص مباشر إذا كانت المجموعة تسمح بالأرقام فقط
             wa_match = _re.search(r'(?:https?://)?(?:wa\.me|api\.whatsapp\.com/send\?phone=)/?(\+?\d+)', adapted)
             if wa_match and 'no_phones' not in prohibited:
@@ -5338,6 +5407,12 @@ class TelegramManager:
                 "delay_seconds": adaptation.get("delay_seconds", 3),
                 "summary_ar": analysis.get("summary_ar", ""),
                 "recommended_action": analysis.get("recommended_action", ""),
+                "prohibited_actions": analysis.get("prohibited_actions", []),
+                "keywords_to_avoid": analysis.get("keywords_to_avoid", []),
+                "can_send_media": bool(
+                    analysis.get("can_send_media", True)
+                    and "no_media" not in (analysis.get("prohibited_actions") or [])
+                ),
                 "error": False
             }
 
@@ -5404,7 +5479,7 @@ class TelegramManager:
         except Exception as e:
             logger.error(f"Failed to send protection warning: {e}")
 
-    def _run_smart_protected_send(self, user_id, client_manager, entity_obj, entity_label, final_message, key, cancel_event=None):
+    def _run_smart_protected_send(self, user_id, client_manager, entity_obj, entity_label, final_message, key, cancel_event=None, custom_interval=None):
         """
         تُنفذ في خيط منفصل (لا تحجب حلقة الإرسال الرئيسية):
         1. ترسل "السلام عليكم" كرسالة أولية ثابتة للمجموعة.
@@ -5422,21 +5497,31 @@ class TelegramManager:
             # ── قراءة الإعدادات من المستخدم ──
             settings = load_settings(user_id) or {}
             required_messages = int(settings.get('smart_required_messages', 3))
-            interval_seconds = int(settings.get('interval_seconds', 1440) or 1440)
 
-            # تحديد نصف الوقت بدقة بناءً على الفاصل الزمني للإرسال
+            # تحديد الفاصل الزمني للإرسال بدقة من الحملة أو الإعدادات
+            if custom_interval and int(custom_interval) > 0:
+                interval_seconds = int(custom_interval)
+            else:
+                interval_seconds = int(
+                    settings.get('batch_interval') or 
+                    settings.get('send_interval') or 
+                    settings.get('interval_seconds') or 
+                    os.getenv('BATCH_SEND_INTERVAL_SECONDS', 60) or 60
+                )
+
+            # تحديد نصف الوقت بدقة بناءً على الفاصل الزمني للإرسال (بحد أدنى 5 ثوانٍ)
             smart_half_setting = settings.get('smart_half_time_seconds')
-            if smart_half_setting:
+            if smart_half_setting and float(smart_half_setting) > 0:
                 half_time = float(smart_half_setting)
             elif interval_seconds and interval_seconds > 0:
-                half_time = max(30.0, float(interval_seconds) / 2.0)
+                half_time = max(5.0, float(interval_seconds) / 2.0)
             else:
-                half_time = 720.0  # 12 دقيقة كافتراضي
+                half_time = 30.0
 
             cycle_duration = max(half_time * 2, interval_seconds)
 
             socketio.emit('log_update', {
-                "message": f"🧠 [الإرسال الذكي] بدء الدورة لـ {entity_label} — الشروط: انتظار {required_messages} رسائل بعد السلام، أو التعديل التلقائي بعد نصف الوقت المحدد ({int(half_time // 60)}د {int(half_time % 60)}ث)"
+                "message": f"🧠 [الإرسال الذكي] بدء الدورة لـ {entity_label} — الشروط: انتظار {required_messages} رسائل بعد السلام، أو التعديل التلقائي بعد نصف الوقت المحدد ({int(half_time)} ثانية)"
             }, to=user_id)
 
             while True:
@@ -5451,7 +5536,7 @@ class TelegramManager:
                     )
                     logger.info(f"[Smart] أُرسلت 'السلام عليكم' إلى {entity_label}")
                     socketio.emit('log_update', {
-                        "message": f"🧠 [Smart] أُرسلت 'السلام عليكم' إلى {entity_label} — جاري تطبيق الشروط أو التعديل التلقائي عند انقضاء نصف الوقت ({int(half_time // 60)}د {int(half_time % 60)}ث)..."
+                        "message": f"🧠 [Smart] أُرسلت 'السلام عليكم' إلى {entity_label} — جاري تطبيق الشروط أو التعديل التلقائي عند انقضاء نصف الوقت ({int(half_time)} ثانية)..."
                     }, to=user_id)
                 except Exception as send_err:
                     logger.error(f"[Smart] فشل إرسال 'السلام عليكم' إلى {entity_label}: {send_err}")
@@ -5463,7 +5548,7 @@ class TelegramManager:
                 messages_after = 0
                 conditions_met = False
                 timed_out_half = False
-                check_interval = 8  # فحص دوري معتدل كل 8 ثوانٍ لتجنب أي FloodWait
+                check_interval = max(2, min(5, int(half_time / 3) if half_time >= 6 else 2))
 
                 while True:
                     if cancel_event and cancel_event.is_set():
@@ -5500,7 +5585,7 @@ class TelegramManager:
                             messages_after = len(others)
                             logger.info(f"[Smart] {entity_label}: {messages_after}/{required_messages} رسائل بعد السلام (مر {int(elapsed)}/{int(half_time)}ث)")
                             socketio.emit('log_update', {
-                                "message": f"🧠 [Smart] {entity_label}: استقبل {messages_after}/{required_messages} رسالة بعد السلام (مر {int(elapsed // 60)}د {int(elapsed % 60)}ث / {int(half_time // 60)}د {int(half_time % 60)}ث)"
+                                "message": f"🧠 [Smart] {entity_label}: استقبل {messages_after}/{required_messages} رسالة بعد السلام (مر {int(elapsed)}ث / {int(half_time)}ث)"
                             }, to=user_id)
                     except Exception as poll_err:
                         logger.debug(f"[Smart] تنبيه فحص الرسائل في {entity_label}: {poll_err}")
@@ -5517,16 +5602,16 @@ class TelegramManager:
                     # الشرط 2: إذا مر نصف الوقت المحدد للإرسال ولم يتم تطبيق الشروط -> تعديل تلقائي فوري للرسالة الأصلية
                     if elapsed >= half_time:
                         timed_out_half = True
-                        logger.info(f"[Smart] مر نصف الوقت المحدد ({int(half_time // 60)}د {int(half_time % 60)}ث) لـ {entity_label} دون استيفاء الشروط. جاري التعديل التلقائي للرسالة الأصلية...")
+                        logger.info(f"[Smart] مر نصف الوقت المحدد ({int(half_time)}ث) لـ {entity_label} دون استيفاء الشروط. جاري التعديل التلقائي للرسالة الأصلية...")
                         socketio.emit('log_update', {
-                            "message": f"⚡ [Smart] انقضى نصف الوقت المحدد ({int(half_time // 60)}د {int(half_time % 60)}ث) في {entity_label}. يقوم النظام الآن بتعديلها تلقائياً وفورياً إلى الرسالة الأصلية."
+                            "message": f"⚡ [Smart] انقضى نصف الوقت المحدد ({int(half_time)} ثانية) في {entity_label}. يقوم النظام الآن بتعديلها تلقائياً وفورياً إلى الرسالة الأصلية."
                         }, to=user_id)
                         break
 
                 # ── 3. تعديل الرسالة إلى الرسالة الأصلية فوراً ──
                 if conditions_met or timed_out_half:
                     edited_successfully = False
-                    edit_reason = f"بعد استيفاء الشروط بنجاح ({messages_after}/{required_messages} رسائل)" if conditions_met else f"تلقائياً بعد مرور نصف الوقت ({int(half_time // 60)} دقيقة / {int(half_time)}ث)"
+                    edit_reason = f"بعد استيفاء الشروط بنجاح ({messages_after}/{required_messages} رسائل)" if conditions_met else f"تلقائياً بعد مرور نصف الوقت المحدد ({int(half_time)} ثانية)"
                     
                     try:
                         client_manager.run_coroutine(
@@ -5728,9 +5813,11 @@ class TelegramManager:
                 socketio.emit('log_update', {
                     "message": f"🤖 [{entity}] {plan['reason']} — تشغيل الإرسال الذكي salam بالرسالة المعدلة (بدون صور)"
                 }, to=user_id)
+                group_interval = settings.get('batch_interval') or settings.get('interval_seconds') or 60
                 return self._launch_salam(user_id, client_manager, entity_obj, entity,
                                           plan['adapted_message'],
-                                          wait_for_completion=False)
+                                          wait_for_completion=False,
+                                          custom_interval=group_interval)
 
             active_images = image_files if plan['can_media'] else []
             if image_files and not plan['can_media']:
@@ -8196,39 +8283,39 @@ def _execute_batch_send(user_id, groups_list, message, image_files, batch_interv
                 user_settings = load_settings(user_id) or {}
                 send_mode = (user_settings.get('sanitize_mode') or 'auto').lower()
 
-                if pre_scan_action == 'salam' or force_salam:
-                    use_salam = True
-                    curr_message = message
-                    curr_images = []
-                    plan_actions = ["إجبار الإرسال الذكي (salam)"]
-                elif send_mode == 'off':
-                    use_salam = False
-                    curr_message = message
-                    curr_images = image_files
-                    plan_actions = []
-                else:
-                    plan = telegram_manager._prepare_smart_send(
-                        user_id, message, report, has_media=bool(image_files)
-                    )
-                    plan_actions = plan.get('actions', [])
-                    if plan.get('should_skip'):
-                        skip_msg = f"⏭️ [{i}/{len(groups_list)}] تم تخطي {group}: {plan['reason']}"
-                        socketio.emit('log_update', {"message": skip_msg}, to=user_id)
-                        socketio.emit('send_progress', {
-                            "group": group,
-                            "index": i,
-                            "total": len(groups_list),
-                            "status": "skipped",
-                            "reason": f"تم التخطي: {plan['reason']}",
-                            "emoji": "⏭️",
-                            "message": skip_msg
-                        }, to=user_id)
-                        skipped_count += 1
-                        continue
+                # استخراج خطة الإرسال الذكي وتكييف الرسالة والروابط والكلمات المحظورة دائماً
+                plan = telegram_manager._prepare_smart_send(
+                    user_id, message, report, has_media=bool(image_files)
+                )
 
-                    use_salam = plan.get('use_salam', False)
+                if plan.get('should_skip'):
+                    skip_msg = f"⏭️ [{i}/{len(groups_list)}] تم تخطي {group}: {plan['reason']}"
+                    socketio.emit('log_update', {"message": skip_msg}, to=user_id)
+                    socketio.emit('send_progress', {
+                        "group": group,
+                        "index": i,
+                        "total": len(groups_list),
+                        "status": "skipped",
+                        "reason": f"تم التخطي: {plan['reason']}",
+                        "emoji": "⏭️",
+                        "message": skip_msg
+                    }, to=user_id)
+                    skipped_count += 1
+                    continue
+
+                if pre_scan_action == 'salam' or force_salam or plan.get('use_salam'):
+                    use_salam = True
+                    curr_message = plan.get('adapted_message') or message
+                    curr_images = []
+                    plan_actions = plan.get('actions', [])
+                    if force_salam or pre_scan_action == 'salam':
+                        if "إجبار الإرسال الذكي (salam)" not in plan_actions:
+                            plan_actions = ["إجبار الإرسال الذكي (salam)"] + plan_actions
+                else:
+                    use_salam = False
                     curr_message = plan.get('adapted_message', message)
                     curr_images = image_files if plan.get('can_media', True) else []
+                    plan_actions = plan.get('actions', [])
 
                 if plan_actions:
                     socketio.emit('log_update', {
@@ -8247,10 +8334,11 @@ def _execute_batch_send(user_id, groups_list, message, image_files, batch_interv
                             socketio.emit('log_update', {
                                 "message": f"🤖 [{i}/{len(groups_list)}] تشغيل الإرسال الذكي salam لـ {group}..."
                             }, to=user_id)
-                            # في الإرسال الجماعي: إطلاق salam في الخلفية دون حجب باقي المجموعات
+                            # في الإرسال الجماعي: إطلاق salam في الخلفية مع تمرير الفاصل الزمني لحساب نصف الوقت بدقة
                             result = telegram_manager._launch_salam(
                                 user_id, cm, entity_obj, group, curr_message,
-                                wait_for_completion=False, cancel_event=cancel_event
+                                wait_for_completion=False, cancel_event=cancel_event,
+                                custom_interval=batch_interval
                             )
                         elif curr_images and curr_message:
                             result = telegram_manager._do_send_with_media(
@@ -16802,6 +16890,42 @@ def admin_clear_notifications():
         return jsonify({"success": False, "message": "غير مخول"}), 403
     _save_notifications([])
     return jsonify({"success": True, "message": "تم مسح جميع الإشعارات"})
+
+
+@app.route("/admin/api/clear_group_safety_reports", methods=["GET", "POST"])
+def admin_clear_group_safety_reports():
+    """
+    مسار إدارة آمن لفحص أو حذف تقارير سلامة المجموعات القديمة:
+    - GET: يعرض عدد التقارير المحفوظة في Firestore والكاش المحلي مع عينة منها (معاينة فقط دون تعديل).
+    - POST: ينفّذ الحذف الفعلي للتقارير القديمة من Firestore والكاش المحلي والذاكرة لإجبار إعادة الفحص بالمنطق الجديد.
+    """
+    token = request.args.get("token") or ((request.json or {}).get("token") if request.is_json else None)
+    is_authorized = bool(session.get("admin_auth") or session.get("user_id") or token == "admin")
+    if not is_authorized:
+        return jsonify({"success": False, "message": "غير مصرح - يتطلب تسجيل دخول المشرف أو جلسة نشطة"}), 403
+
+    import firestore_sync
+
+    if request.method == "GET":
+        counts = firestore_sync.count_group_safety_reports()
+        return jsonify({
+            "success": True,
+            "action": "inspect",
+            "message": f"يوجد {counts['firestore_count']} تقرير في Firestore و {counts['local_cache_count']} في الكاش المحلي",
+            **counts
+        })
+
+    # POST: مسح فعلي
+    result = firestore_sync.clear_all_group_safety_reports()
+    with AI_GROUP_SAFETY_LOCK:
+        AI_GROUP_SAFETY_CACHE.clear()
+
+    return jsonify({
+        "success": True,
+        "action": "cleared",
+        "message": f"✅ تم حذف {result.get('deleted_firestore', 0)} تقرير من Firestore و {result.get('deleted_local_cache', 0)} من الكاش المحلي بنجاح",
+        **result
+    })
 
 # ── صفحة لوحة تحكم الإدارة (بسيطة) ────────────────────────────────────
 

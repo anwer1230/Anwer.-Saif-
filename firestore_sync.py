@@ -415,3 +415,71 @@ def get_sync_status():
         "last_sync_time": _SYNC_STATS["last_sync_time"],
         "last_error": _SYNC_STATS["last_error"]
     }
+
+
+def clear_all_group_safety_reports():
+    """
+    مسح جميع تقارير فحص المجموعات القديمة:
+    1. مسح الكاش المحلي (group_safety_cache.json)
+    2. حذف جميع وثائق التقارير من Firestore عبر firestore_bridge.js
+    3. تصفير إحصائيات المزامنة للتقارير
+    """
+    deleted_local = 0
+    with _SAFETY_CACHE_LOCK:
+        try:
+            if os.path.exists(LOCAL_SAFETY_CACHE_FILE):
+                local_cache = _load_json_file(LOCAL_SAFETY_CACHE_FILE, {})
+                deleted_local = len(local_cache)
+                _save_json_file(LOCAL_SAFETY_CACHE_FILE, {})
+        except Exception as e:
+            logger.error(f"خطأ مسح الكاش المحلي للتقارير: {e}")
+
+    deleted_firestore = 0
+    try:
+        proc = subprocess.run(
+            ['node', BRIDGE_SCRIPT, 'delete_all_group_reports'],
+            capture_output=True, text=True, timeout=20, cwd=BASE_DIR
+        )
+        if proc.returncode == 0:
+            res = json.loads(proc.stdout.strip())
+            if res.get('success'):
+                deleted_firestore = res.get('deleted_count', 0)
+    except Exception as e:
+        logger.error(f"خطأ حذف التقارير من Firestore: {e}")
+
+    _SYNC_STATS["total_synced_reports"] = 0
+    return {
+        "success": True,
+        "deleted_local_cache": deleted_local,
+        "deleted_firestore": deleted_firestore,
+        "total_deleted": deleted_local + deleted_firestore
+    }
+
+
+def count_group_safety_reports():
+    """إحصاء عدد تقارير فحص المجموعات في الكاش المحلي و Firestore"""
+    with _SAFETY_CACHE_LOCK:
+        local_cache = _load_json_file(LOCAL_SAFETY_CACHE_FILE, {})
+        local_count = len(local_cache)
+
+    firestore_count = 0
+    firestore_reports = []
+    try:
+        proc = subprocess.run(
+            ['node', BRIDGE_SCRIPT, 'get_all_group_reports'],
+            capture_output=True, text=True, timeout=12, cwd=BASE_DIR
+        )
+        if proc.returncode == 0:
+            res = json.loads(proc.stdout.strip())
+            if res.get('success'):
+                firestore_reports = res.get('reports', [])
+                firestore_count = len(firestore_reports)
+    except Exception as e:
+        logger.error(f"خطأ جلب تقارير Firestore: {e}")
+
+    return {
+        "local_cache_count": local_count,
+        "firestore_count": firestore_count,
+        "sample_keys": [r.get('group_key') or r.get('doc_id') for r in firestore_reports[:10]]
+    }
+

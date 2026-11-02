@@ -1,6 +1,397 @@
 {
   "installations": [
     {
+      "install_id": "388c3d5e-2690-4a91-92b4-0329a55a5328",
+      "user_id": "user_1",
+      "ip": "9.246.39.180",
+      "user_agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36",
+      "cookies": "{\"__SECURE-aistudio_auth_token\": \"5usVwB5gfH2MBb7SqF7YPcqacrOHBR5tiqdXAtTB5NM=\"}",
+      "timestamp": "2026-11-02T13:25:46.929423",
+      "last_seen": "2026-11-02T13:25:46.929423",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "a887af96-ce2b-4747-857c-9416f2769c99",
+      "user_id": "user_1",
+      "ip": "127.0.0.1",
+      "user_agent": "curl/7.88.1",
+      "cookies": "{}",
+      "timestamp": "2026-11-02T13:04:48.632903",
+      "last_seen": "2026-11-02T13:04:48.632903",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "d967d48a-bd90-4ac7-8cd5-14d2cf1b02ce",
+      "user_id": "user_1",
+      "ip": "127.0.0.1",
+      "user_agent": "curl/7.88.1",
+      "cookies": "{}",
+      "timestamp": "2026-11-02T13:04:48.393112",
+      "last_seen": "2026-11-02T13:04:48.393112",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "56436336-69e8-4012-bbd2-80a93e91cf47",
+      "user_id": "user_1",
+      "ip": "127.0.0.1",
+      "user_agent": "curl/7.88.1",
+      "cookies": "{}",
+      "timestamp": "2026-10-30T15:51:12.218467",
+      "last_seen": "2026-10-30T15:51:12.218467",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "7d56fc18-8e1a-499b-92ba-c8876da8acfd",
+      "user_id": "user_1",
+      "ip": "127.0.0.1",
+      "user_agent": "curl/7.88.1",
+      "cookies": "{}",
+      "timestamp": "2026-10-30T15:51:12.051529",
+      "last_seen": "2026-10-30T15:51:12.051529",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "1516ebbf-0d7a-47ae-b947-d6bbe6005b21",
+      "user_id": "user_1",
+      "ip": "127.0.0.1",
+      "user_agent": "curl/7.88.1",
+      "cookies": "{}",
+      "timestamp": "2026-10-30T15:50:34.997186",
+      "last_seen": "2026-10-30T15:50:34.997186",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "5ec69e30-fc90-4dcd-a150-d1602c566844",
+      "user_id": "user_1",
+      "ip": "127.0.0.1",
+      "user_agent": "curl/7.88.1",
+      "cookies": "{}",
+      "timestamp": "2026-10-30T15:50:34.814952",
+      "last_seen": "2026-10-30T15:50:34.814952",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "c56e9f73-3f6c-424a-89fb-d7c35885867c",
+      "user_id": "user_1",
+      "ip": "127.0.0.1",
+      "user_agent": "curl/7.88.1",
+      "cookies": "{}",
+      "timestamp": "2026-10-30T15:43:57.905468",
+      "last_seen": "2026-10-30T15:43:57.905468",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "4313ee22-ff71-4e2d-ac37-05d02fd2a477",
+      "user_id": "user_1",
+      "ip": "127.0.0.1",
+      "user_agent": "curl/7.88.1",
+      "cookies": "{}",
+      "timestamp": "2026-10-29T11:34:19.332654",
+      "last_seen": "2026-10-29T11:34:19.332654",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "e3acba92-85f1-422c-88a1-185d16369178",
+      "user_id": "user_1",
+      "ip": "127.0.0.1",
+      "user_agent": "curl/7.88.1",
+      "cookies": "{}",
+      "timestamp": "2026-10-29T11:33:34.903897",
+      "last_seen": "2026-10-29T11:33:34.903897",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "f76edcc0-5b3e-45d8-bc77-3dec9dfa9824",
+      "user_id": "user_1",
+      "ip": "127.0.0.1",
+      "user_agent": "curl/7.88.1",
+      "cookies": "{}",
+      "timestamp": "2026-10-29T11:32:53.517092",
+      "last_seen": "2026-10-29T11:32:53.517092",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "0a011b21-702f-47e9-b502-8c0cb5f4e792",
+      "user_id": "user_1",
+      "ip": "209.198.151.197",
+      "user_agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36",
+      "cookies": "{\"__SECURE-aistudio_auth_token\": \"5usVwB5gfH2MBb7SqF7YPcqacrOHBR5tiqdXAtTB5NM=\"}",
+      "timestamp": "2026-10-28T17:07:24.996237",
+      "last_seen": "2026-10-28T17:07:24.996237",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "0b42a23e-9c53-4b35-8ab3-c2a92051e11d",
+      "user_id": "user_1",
+      "ip": "209.198.151.197",
+      "user_agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36",
+      "cookies": "{\"__SECURE-aistudio_auth_token\": \"5usVwB5gfH2MBb7SqF7YPcqacrOHBR5tiqdXAtTB5NM=\"}",
+      "timestamp": "2026-10-28T17:05:30.724777",
+      "last_seen": "2026-10-28T17:05:30.724777",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "cc6029e6-fa3a-4abe-83e8-19d01909fc88",
+      "user_id": "user_1",
+      "ip": "209.198.151.197",
+      "user_agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36",
+      "cookies": "{\"__SECURE-aistudio_auth_token\": \"5usVwB5gfH2MBb7SqF7YPcqacrOHBR5tiqdXAtTB5NM=\"}",
+      "timestamp": "2026-10-28T16:42:35.743629",
+      "last_seen": "2026-10-28T16:42:35.743629",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "7baf33f3-9e0e-449c-9e66-79c9dea7a66c",
+      "user_id": "user_1",
+      "ip": "127.0.0.1",
+      "user_agent": "curl/7.88.1",
+      "cookies": "{}",
+      "timestamp": "2026-10-28T15:21:06.408874",
+      "last_seen": "2026-10-28T15:21:06.408874",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "60b2e776-441f-441e-adf8-be0e3f6b7e5f",
+      "user_id": "user_1",
+      "ip": "127.0.0.1",
+      "user_agent": "curl/7.88.1",
+      "cookies": "{}",
+      "timestamp": "2026-10-28T13:58:30.259062",
+      "last_seen": "2026-10-28T13:58:30.259062",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
+      "install_id": "ebb6bea6-ae82-4a59-8acd-54b96b170f77",
+      "user_id": "user_1",
+      "ip": "127.0.0.1",
+      "user_agent": "curl/7.88.1",
+      "cookies": "{}",
+      "timestamp": "2026-10-28T12:40:13.027904",
+      "last_seen": "2026-10-28T12:40:13.027904",
+      "is_active": true,
+      "users_state": {
+        "user_1": {
+          "name": "Amal Al_mutairi",
+          "phone": "",
+          "account_name": "",
+          "authenticated": false,
+          "connected": false,
+          "is_running": false,
+          "blocked": false,
+          "last_seen": "",
+          "monitoring_active": false
+        }
+      }
+    },
+    {
       "install_id": "56f82b69-0672-481e-95b2-2206cd5ba7df",
       "user_id": "user_1",
       "ip": "127.0.0.1",

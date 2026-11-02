@@ -229,6 +229,34 @@ async function getAllGroupSafetyReports() {
   return reports;
 }
 
+async function deleteAllGroupSafetyReports() {
+  let deletedCount = 0;
+  try {
+    const snap = await getDocs(collection(db, 'saved_links'));
+    for (const d of snap.docs) {
+      const data = d.data();
+      if (d.id.startsWith('report_') || data.category === 'safety_report' || data.type === 'safety_report') {
+        await deleteDoc(doc(db, 'saved_links', d.id));
+        deletedCount++;
+      }
+    }
+  } catch (e) {
+    console.error('Error deleting from saved_links:', e.message);
+  }
+
+  try {
+    const snap2 = await getDocs(collection(db, 'group_safety_reports'));
+    for (const d of snap2.docs) {
+      await deleteDoc(doc(db, 'group_safety_reports', d.id));
+      deletedCount++;
+    }
+  } catch (e) {
+    // collection may not exist or be accessible
+  }
+
+  return deletedCount;
+}
+
 // CLI handler
 const action = process.argv[2];
 try {
@@ -266,6 +294,9 @@ try {
   } else if (action === 'get_all_group_reports') {
     const reports = await getAllGroupSafetyReports();
     console.log(JSON.stringify({ success: true, reports }));
+  } else if (action === 'delete_all_group_reports') {
+    const count = await deleteAllGroupSafetyReports();
+    console.log(JSON.stringify({ success: true, deleted_count: count }));
   } else {
     console.log(JSON.stringify({ error: 'Unknown action' }));
   }
