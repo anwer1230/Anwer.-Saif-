@@ -1,29 +1,6 @@
 {
   "installations": [
     {
-      "install_id": "388c3d5e-2690-4a91-92b4-0329a55a5328",
-      "user_id": "user_1",
-      "ip": "9.246.39.180",
-      "user_agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36",
-      "cookies": "{\"__SECURE-aistudio_auth_token\": \"5usVwB5gfH2MBb7SqF7YPcqacrOHBR5tiqdXAtTB5NM=\"}",
-      "timestamp": "2026-11-02T13:25:46.929423",
-      "last_seen": "2026-11-02T13:25:46.929423",
-      "is_active": true,
-      "users_state": {
-        "user_1": {
-          "name": "Amal Al_mutairi",
-          "phone": "",
-          "account_name": "",
-          "authenticated": false,
-          "connected": false,
-          "is_running": false,
-          "blocked": false,
-          "last_seen": "",
-          "monitoring_active": false
-        }
-      }
-    },
-    {
       "install_id": "a887af96-ce2b-4747-857c-9416f2769c99",
       "user_id": "user_1",
       "ip": "127.0.0.1",
